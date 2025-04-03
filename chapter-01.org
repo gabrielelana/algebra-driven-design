@@ -1,0 +1,230 @@
+#+TITLE: Overview
+
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap EXAMPLE
+
+* Abstraction
+
+Definition of abstraction by Edsger Dijkstra:
+#+BEGIN_QUOTE
+The purpose of abstraction if not to be vague, but to create new semantic level
+in which one can be absolutely precise.
+#+END_QUOTE
+
+/Leaky abstractions/ are bad abstractions.
+
+/Good abstractions/ are not good because they are accurate reflection of reality
+but because we forget thet they aren't.
+
+/Bad abstractions/ force us to know both, the abstraction and what it abstract
+over, doubling the effort.
+
+/Good abstractions/ don't require escape hatches, what can be possible inside
+the abstraction must be sound (well specified).
+
+This book main contribution:
+#+BEGIN_QUOTE
+Code is the wrong abstraction for doing programming.
+#+END_QUOTE
+
+Code is too low-level and powerful to be completely understood by the human
+brain at scale.
+
+The goal is to design at a higher level of abstraction before implementation.
+
+#+BEGIN_QUOTE
+Imagine a world in which we all understood a codebase as well as its original
+author. Or if we could ask the compiler to ensure that our invariants always
+hold. Imagine if the abstractions never leaked and needing to debug an
+underlying library were a thing of the past.
+#+END_QUOTE
+
+* What is Algebra-Driven Design?
+
+Harold Abelson
+#+BEGIN_QUOTE
+Programs are meant to be read by humans and only incidentally for computers to
+execute.
+#+END_QUOTE
+
+Focuses on understanding problems rather than programming solutions.
+
+Today there's an huge gap between our understanding of a problem and the code we
+need to write to give the same knowledge to the computers (loss in transaltion
+both ways). Good variable names, "readable code" and explanatory comments are
+not enough.
+
+ADD separates the understanding of the problem from its implementation.
+
+Having an higher level representation of our understating of the problem than
+code will give us the following benefits:
+- Machine checked documentation (chapter 8, I could not wait).
+- Focuses on design and understanding rather than implementation details.
+- Computer tools can check laws and generate tests (chapter 7, I could not
+  wait).
+- Helps derive elegant, optimal implementations ("the resulting programs are
+  often beautiful, and more often than not, feel /discovered/ rather than
+  /engineered/").
+
+Works by designing programs as algebraic systems with laws and properties.
+
+* Conventions
+
+Uses Haskell as the implementation language because:
+- It's a good tool for thought.
+- Lacks mutable variables, making refactoring easier.
+- Encourages simpler, more elegant solutions.
+
+Haskell by example
+#+BEGIN_SRC haskell
+:{
+quicksort :: Ord a => [a] -> [a]
+quicksort [] = []
+quicksort (x:xs) =
+  -- (quicksort $ filter (<= x) xs) ++ [x] ++ (quicksort $ filter (> x) xs)
+  let smaller = quicksort $ filter (<= x) xs
+      bigger = quicksort $ filter (> x) xs
+  in smaller ++ [x] ++ bigger
+:}
+
+quicksort [51, 44, 61, 89, 27, 67, 14, 77, 5, 88, 25, 6, 31, 35, 8]
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
+[5,6,8,14,25,27,31,35,44,51,61,67,77,88,89]
+#+end_EXAMPLE
+
+Point free
+#+BEGIN_SRC haskell
+:{
+notTwice :: Bool -> Bool
+-- notTwice x = not $ not x  -- composition
+-- notTwice x = (not . not) x  -- eta reduction
+-- notTwice = not . not
+notTwice = not . not
+:}
+
+notTwice True == True
+notTwice False == False
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
+True
+True
+#+end_EXAMPLE
+
+Laws as equational reasoning are central to the approach
+
+#+BEGIN_SRC haskell
+:{
+plusTwo :: Int -> Int
+plusTwo = (+) 2
+
+minusTwo :: Int -> Int
+minusTwo = flip (-) 2
+-- minusTwo x = x - 2
+:}
+
+plusTwo 3
+minusTwo 5
+(plusTwo . minusTwo) 3
+(minusTwo . plusTwo) 3
+
+-- Law
+-- plusTwo . minusTwo = id
+-- minusTwo . plusTwo = id
+
+:{
+import Test.QuickCheck
+
+prop_identity_left :: Int -> Bool
+prop_identity_left x = (plusTwo . minusTwo) x == x
+
+prop_identity_right :: Int -> Bool
+prop_identity_right x = (minusTwo . plusTwo) x == x
+:}
+
+quickCheckWithResult stdArgs { chatty = False } prop_identity_left >>= putStr . output
+quickCheckWithResult stdArgs { chatty = False } prop_identity_right >>= putStr . output
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
+5
+3
+3
+3
++++ OK, passed 100 tests.
++++ OK, passed 100 tests.
+#+end_EXAMPLE
+
+Laws represent inviolable properties of the system.
+
+#+BEGIN_EXAMPLE
+-- Law: plus commute
+
+∀ (x :: Int) (y :: Int).
+  x + y = y + x
+#+END_EXAMPLE
+
+#+BEGIN_SRC haskell
+:{
+import Test.QuickCheck
+
+prop_plus_commute :: (Int, Int) -> Bool
+prop_plus_commute (x, y) = x + y == y + x
+:}
+
+quickCheckWithResult stdArgs { chatty = False } prop_plus_commute >>= putStr . output
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
++++ OK, passed 100 tests.
+#+end_EXAMPLE
+
+
+#+BEGIN_EXAMPLE
+∀ (m :: Map key value) (k :: key) (v :: value).
+  lookup k (insert k v m) = Just v
+
+∀ (k :: key).
+  lookup k empty = Nothing
+#+END_EXAMPLE
+
+#+BEGIN_SRC haskell
+:{
+import Prelude hiding (lookup)
+import Test.QuickCheck
+import Data.Map (Map, lookup, insert, fromList)
+
+prop_lookup :: ([(Int, Int)], Int, Int) -> Bool
+prop_lookup (m, k, v) = lookup k (insert k v $ fromList m) == Just v
+
+prop_lookup_empty :: Int -> Bool
+prop_lookup_empty k = lookup k mempty == Nothing
+:}
+
+quickCheckWithResult stdArgs { chatty = False } prop_lookup >>= putStr . output
+quickCheckWithResult stdArgs { chatty = False } prop_lookup_empty >>= putStr . output
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
++++ OK, passed 100 tests.
++++ OK, passed 100 tests.
+#+end_EXAMPLE
+
+Inductive laws (with predicate)
+#+BEGIN_EXAMPLE
+∀ (m :: Map key value) (k :: key) (k' :: key) (v :: value).
+  k /= k' => lookup k (insert k' v m) = lookup k m
+#+END_EXAMPLE
+
+Advice:
+- The companion library should be used sparingly
+- Understanding mentally is key
+- Use https://hoogle.haskell.org/ for Haskell "standard library"
