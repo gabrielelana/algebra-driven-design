@@ -1,0 +1,567 @@
+#+TITLE: Tiles
+
+#+STARTUP: inlineimages
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap EXAMPLE
+
+* Introduction
+
+We will hold off on writing any code for quite some time, there wil be nothing
+to "get our hands on", we can't "get it running, then get it right after".
+
+NDG: Discuss the previous point, do not underestimate the power of real world
+feedback, if the "design space" includes the "real world" then having something
+"running" is powerful learning tool.
+
+* Basic Building Blocks
+
+#+BEGIN_SRC haskell :eval never
+-- Data type witout data constructor
+data Tile
+
+-- Terminal constructors
+haskell :: Tile
+sandy :: Tile
+#+END_SRC
+
+All terms in algebra are built from /terminal consturctors/ (like ~haskell~ and
+~sandy~) and /inductive constructors/ which derive new terms based on existing
+terms.
+
+An example of /inductive constructor/ is the 90 degrees clockwise rotation of a
+~Tile~ called ~cw~. Note that since ~cw~ "consumes" a ~Tile~ and "produces" a
+~Tile~ then ~cw~ can be called on the itself.
+
+#+BEGIN_SRC haskell :eval never
+cw :: Tile -> Tile
+#+END_SRC
+
+If we call ~cw~ four times then we end up with the same original ~Tile~
+
+#+BEGIN_EXAMPLE
+-- Law: 4*cw
+∀ (t :: Tile).
+  cw (cw (cw (cw t))) = t
+#+END_EXAMPLE
+
+Since an algebra must have /consistent semantics/ the decision we make ripple
+throughout the design, forcing constraints upon us.
+
+#+BEGIN_QUOTE
+It's the equation that really matter!
+#+END_QUOTE
+
+Any valid implementation of an algebra is a solution to its system of equations.
+
+We can also define the couterclockwise /inductive constructor/ which will rotate
+the ~Tile~ 90 degrees counterclockwise.
+
+#+BEGIN_SRC haskell :eval never
+ccw :: Tile -> Tile
+#+END_SRC
+
+It can be omitted because it can be implemented as an /inductive constructor/
+over ~cw~
+
+#+BEGIN_SRC haskell :eval never
+ccw :: Tile -> Tile
+ccw = cw . cw . cw
+#+END_SRC
+
+Or we can implement it directly for performance reason and avoid anoying bugs by
+simply giving a law relating ~cw~ with ~ccw~ so that if the law holds, there can
+be no bugs.
+
+#+BEGIN_EXAMPLE
+-- Law: ccw/cw
+∀ (t :: Tile).
+  ccw (cw t) = t
+
+-- Law: cw/ccw
+∀ (t :: Tile).
+  cw (ccw t) = t
+#+END_EXAMPLE
+
+With the laws we can derive facts like rotating clockwise three times is the
+same as rotating counterclockwise one time.
+
+#+BEGIN_EXAMPLE
+ccw t                        -- using: cw (cw (cw (cw t))) = t
+ccw (cw (cw (cw (cw t))))    -- using: ccw (cw t) = t
+cw (cw (cw t))               -- then: ccw t = cw (cw (cw t))
+#+END_EXAMPLE
+
+Introduce two new /inductive constructor/ to flip the ~Tile~ horizontally and
+vertically
+
+#+BEGIN_SRC haskell
+flipH :: Tile -> Tile
+flipV :: Tile -> Tile
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: 2*flipH
+∀ (t :: Tile).
+  flipH (flipH t) = t
+
+-- Law: 2*flipV
+∀ (t :: Tile).
+  flipV (flipV t) = t
+#+END_EXAMPLE
+
+We can entangle the semantics of ~flipH~ and ~cw~
+
+#+BEGIN_EXAMPLE
+-- Law: flipH/cw/cw/flipH
+∀ (t :: Tile).
+  flipH (cw (cw (flipH t))) = cw (cw t)
+#+END_EXAMPLE
+
+Exercise: Prove ~flipH . cw^{2*n} . flipH = cw^{2*n}~ (NDG: we should also say
+for ~n >= 1~)
+
+#+BEGIN_EXAMPLE
+flipH . cw^{2*n} . flipH = cw^{2*n}
+
+flipH . cw^{2*n} . flipH = cw^{2*n}      -- when n % 2 == 0, then 2 * n % 4 == 0
+flipH . cw^{4*m} . flipH = cw^{4*m}      -- using: cw (cw (cw (cw t))) = t
+flipH . flipH = id                       -- proved directly from law 2*flipH
+
+flipH . cw^{2*n} . flipH = cw^{2*n}      -- when n % 2 != 0, then 2 * n % 4 == 2
+flipH . cw^{2+4*m} . flipH = cw^{2+4*m}  -- using: cw (cw (cw (cw t))) = t
+flipH . cw^{2} . flipH = cw^{2}          -- proved directly from law flipH/cw/cw/flipH
+#+END_EXAMPLE
+
+A law that relates ~cw~ and ~ccw~ under ~flipH~
+
+#+BEGIN_EXAMPLE
+-- Law: x-symmetry
+∀ (t :: Tile).
+  flipH (cw t) = ccw (flipH t)
+#+END_EXAMPLE
+
+Exercise: Find a way of recreating figure 2.11, using only ~cw~, ~ccw~ and ~flipH~.
+
+#+BEGIN_EXAMPLE
+cw . cw . flipH
+#+END_EXAMPLE
+
+#+ATTR_ORG: :width 100
+[[./.resources/haskell-logo.jpg]]
+
+#+BEGIN_EXAMPLE
+-- Law: ccw/flipH/cw
+∀ (t :: Tile).
+  flipV t = ccw (flipH (cw t))
+
+-- Also
+-- Law: cw/cw/flipH
+∀ (t :: Tile).
+  flipV t = cw (cw (flipH t))
+
+-- Law: flipV/flipH
+∀ (t :: Tile).
+  flipV (flipH t) = cw (cw t)
+#+END_EXAMPLE
+
+Exercise: Derive the fact that ~flipV~ is its own inverse, using any of the
+other laws we’ve given for our algebra.
+
+#+BEGIN_EXAMPLE
+-- prove that ∀ (t :: Tile). flipH (flipH t) = t
+
+flipV (flipV t)                               -- using: flipV t = ccw (flipH (cw t))
+flipV (ccw (flipH (cw t)))                    -- using: flipV t = ccw (flipH (cw t))
+ccw (flipH (cw (ccw (flipH (cw t)))))         -- using: cw (ccw t) = t
+ccw (flipH (flipH (cw t)))                    -- using: flipH (flipH t) = t
+ccw (cw t)                                    -- using: ccw (cw t) = t
+t
+#+END_EXAMPLE
+
+Exercise: Derive a proof that ~flipV . flipH = cw . cw~
+
+#+BEGIN_EXAMPLE
+
+flipV (flipH t) = cw (cw t)            -- using: flipV t = ccw (flipH (cw t))
+ccw (flipH (cw (flipH t))) = cw (cw t) -- using: flipH (cw t) = ccw (flipH t)
+flipH (cw (cw (flipH t))) = cw (cw t)  -- using: flipH (cw (cw (flipH t))) = cw (cw t)
+cw (cw t) = cw (cw t)                  -- tautology
+#+END_EXAMPLE
+
+* Subdividing Space
+
+Add composition operations.
+
+#+BEGIN_SRC haskell
+-- place tiles side by side, stretching them to cover a square space (a Tile is a square)
+beside :: Tile -> Tile -> Tile
+-- place one tile above another
+above :: Tile -> Tile -> Tile
+-- four tiles in a square arrangement
+quad :: Tile -> Tile -> Tile -> Tile -> Tile
+-- rotate a tile as it moves through a quad
+swirl :: Tile -> Tile
+-- layer tiles with one on top of another
+behind :: Tile -> Tile -> Tile
+#+END_SRC
+
+We should look for some laws relating ~beside~ to our other constructors.
+
+#+BEGIN_QUOTE
+For every new constructor you add, look for a way to connect it to other things
+in in your algebra.
+#+END_QUOTE
+
+Like ~flipH~ distributes over ~beside~
+
+#+BEGIN_EXAMPLE
+-- Law: flipH/beside
+∀ (t1 :: Tile) (t2 :: Tile).
+  flipH (beside t1 t2) = beside (flipH t2) (flipH t1)
+#+END_EXAMPLE
+
+Exercise: Prove ~flipH (flipH (beside t1 t2)) = beside t1 t2~ in two separate
+ways.
+
+#+BEGIN_EXAMPLE
+flipH (flipH (beside t1 t2)) = beside t1 t2
+
+flipH (flipH (beside t1 t2)) = beside t1 t2                 -- using: flipH (beside t1 t2) = beside (flipH t2) (flipH t1)
+flipH (beside (flipH t2) (flipH t1)) = beside t1 t2         -- using: flipH (beside t1 t2) = beside (flipH t2) (flipH t1)
+beside (flipH (flipH t1)) (flipH (flipH t2)) = beside t1 t2 -- using: flipH (flipH t) = t
+beside t1 t1 = beside t1 t2                                 -- tautology
+
+flipH (flipH (beside t1 t2)) = beside t1 t2 -- using: flipH (flipH t) = t
+beside t1 t2 = beside t1 t2                 -- tautology
+#+END_EXAMPLE
+
+Exercise: Recreate ~above~ constructor using beside, cw and ccw
+
+#+BEGIN_EXAMPLE
+above t1 t2 = ccw (beside (cw t1) (cw t2)) = cw (beside (ccw t1) (ccw t2))
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+-- Law: above
+∀ (t1 :: Tile) (t2 :: Tile).
+  above t1 t2 = cw (beside (ccw t1) (ccw t2))
+
+-- Law: above/beside
+∀ (t1 :: Tile) (t2 :: Tile) (t3 :: Tile) (t4 :: Tile).
+  above (beside t1 t2) (beside t3 t4) = beside (above t1 t3) (above t2 t4)
+
+-- Law: quad
+∀ (t1 :: Tile) (t2 :: Tile) (t3 :: Tile) (t4 :: Tile).
+  quad t1 t2 t3 t4 = above (beside t1 t2) (beside t3 t4)
+
+-- Law: swirl
+∀ (t :: Tile).
+  swirl t = quad t (cw t) (cw (cw t)) (ccw t)
+#+END_EXAMPLE
+
+NDG: no laws for now binds ~behind~ with other constructors, maybe we can say
+that ~∀ (t :: Tile). behind (t t) = t~
+
+Another terminal constructor ~color~
+
+#+BEGIN_SRC haskell :eval never
+color :: Double -- red
+      -> Double -- green
+      -> Double -- blue
+      -> Double -- alpha
+      -> Tile
+#+END_SRC
+
+Each of the channel must be in the close interval ~[0, 1]~, Haskell cannot force
+that so we will constrain it with a law (NDG: clever!)
+
+#+BEGIN_EXAMPLE
+-- Law: clamp channels
+∀ (r :: Double) (g :: Double) (b :: Double) (a :: Double).
+  color r g b a = color (clamp 0 1 r)
+                        (clamp 0 1 g)
+                        (clamp 0 1 b)
+                        (clamp 0 1 a)
+#+END_EXAMPLE
+
+The /terminal constructor/ ~color~ is not affected by other /combinator/
+
+#+BEGIN_EXAMPLE
+-- Law: cw/color
+∀ (r :: Double) (g :: Double) (b :: Double) (a :: Double).
+  cw (color r g b a) = color r g b a
+
+-- Law: flipH/color
+∀ (r :: Double) (g :: Double) (b :: Double) (a :: Double).
+  flipH (color r g b a) = color r g b a
+#+END_EXAMPLE
+
+How ~color~ interacts with ~behind~ can be challenging
+
+#+BEGIN_EXAMPLE
+-- Law: opaque
+∀ (t :: Tile) (r :: Double) (g :: Double) (b :: Double).
+  behind t (color r g b 1) = color r g b 1
+
+-- Law: transparent
+∀ (t :: Tile) (r :: Double) (g :: Double) (b :: Double).
+  behind t (color r g b 0) = t
+#+END_EXAMPLE
+
+Aka ~color r g b 0~ is the right identity for ~behind~ and as such is an "object
+of interest" worthy enough to have a name
+
+#+BEGIN_SRC haskell :eval never
+empty :: Tile
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: empty
+∀ (r :: Double) (g :: Double) (b :: Double).
+  color r g b 0 = empty
+#+END_EXAMPLE
+
+* Observations
+
+We have a much better idea about what it would mean for an implementation to be
+correct: it must satisfy every one of our laws.
+
+An /observation/ is a function "out" of our algebra.
+
+#+BEGIN_SRC haskell :eval never
+data Color deriving Eq
+
+rasterize :: Int       -- resulting width
+          -> Int       -- resulting height
+          -> Tile
+          -> [[Color]] -- pixels in row-major order
+#+END_SRC
+
+Defines what equality means for tiles through the rasterize function. Two tiles
+are equal if they produce the same image under rasterize. Laws specify how
+operations interact with rasterize.
+
+#+BEGIN_EXAMPLE
+-- Law: equality
+∀ (t1 :: Tile) (t2 :: Tile).
+  (∀ (w :: Int) (h :: Int).
+    rasterize w h t1 = rasterize w h t2) => t1 = t2
+
+-- NOTE: the universal quantification of the predicate
+-- (∀ (w :: Int) (h :: Int). rasterize w h t1 = rasterize w h t2)
+#+END_EXAMPLE
+
+#+BEGIN_QUOTE
+Our design isn’t complete until we have given laws that constrain the
+observation of the algebra. For example, there is absolutely nothing in our
+equations that prevent us from mixing up cw and ccw.
+#+END_QUOTE
+
+#+BEGIN_EXAMPLE
+-- Law: rasterize/flipV
+-- Meaning: flipV in rasterized form should reverse the rows
+∀ (t :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (flipV t) = reverse (rasterize w h t)
+
+-- Law: rasterize/flipH
+-- Meaning: flipH in rasterized form should reverse the pixels in each rows
+∀ (t :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (flipH t) = map reverse (rasterize w h t)
+
+-- Law: rasterize/above
+-- Meaning: above in rasterized form should be the concatenation of the 2 rasterized tiles each taking half of the height
+∀ (t1 :: Tile) (t2 :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (above t1 t2) = rasterize w (div h 2) t1 <> rasterize w (div h 2) t2
+
+-- Law: rasterize/beside
+-- NOTE: transpose will convert the representation from array of rows into an array of columns
+∀ (t1 :: Tile) (t2 :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (beside t1 t2) =
+    transpose $
+      transpose (rasterize (div w 2) h t1) <>
+        transpose (rasterize (di w 2) h t2)
+
+-- Law: rasterize/cw
+∀ (t :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (cw t) = fmap reverse (transpose (rasterize h w t))
+#+END_EXAMPLE
+
+Exercise: Give a specification for the observation of ~ccw~
+
+#+BEGIN_EXAMPLE
+-- Law: rasterize/ccw
+∀ (t :: Tile) (w :: Int) (h :: Int).
+  rasterize w h (ccw t) = reverse (transpose (rasterize h w t))
+#+END_EXAMPLE
+
+Practical demonstration
+
+#+BEGIN_SRC haskell
+import Data.List
+
+type Tile = [[Int]]
+
+tile :: Tile = [[1,2],[3,4],[5,6]]
+
+:{
+cw :: Tile -> Tile
+cw = (map reverse) . transpose
+
+ccw :: Tile -> Tile
+ccw = reverse . transpose
+:}
+
+tile
+cw tile
+(cw . cw) tile
+(cw . cw . cw) tile
+(cw . cw . cw) tile == ccw tile
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
+[[1,2],[3,4],[5,6]]
+[[5,3,1],[6,4,2]]
+[[6,5],[4,3],[2,1]]
+[[2,4,6],[1,3,5]]
+True
+#+end_EXAMPLE
+
+We only have left ~color~ and ~beside~
+
+#+BEGIN_EXAMPLE
+-- Law: rasterize/color
+∀ (r :: Double) (g :: Double) (b :: Double) (a :: Double).
+  rasterize w h (color r g b a) = replicate h (replicate w (rgba r g b a))
+
+-- where
+-- rgba :: Double -> Double -> Double -> Double -> Color
+#+END_EXAMPLE
+
+* Generalization
+
+Are we ready to implement? Not quite! We should ask if our design is /overfit/
+(meaning: does it carry any unnecessary baggage, or ask unnecessarily strong
+constraints).
+
+NOTE: ~color~ and ~behind~ are the only ones that require any notion of colorful
+pixels.
+
+We will make the ~Tile a~ a /Functor/ and to separate the operators we can make
+the "space" operators to work on ~Tile a~ and the "color" operators to work on
+~Tile Color~
+
+#+BEGIN_SRC haskell :eval never
+data Tile a deriving Functor
+data Color deriving Eq
+
+rasterize :: Int -> Int -> Tile a -> [[a]]
+
+cw :: Tile a -> Tile a
+ccw :: Tile a -> Tile a
+beside :: Tile a -> Tile a -> Tile a
+above :: Tile a -> Tile a -> Tile a
+flipH :: Tile a -> Tile a
+flipV :: Tile a -> Tile a
+quad :: Tile a -> Tile a -> Tile a -> Tile a -> Tile a
+swirl :: Tile a -> Tile a
+
+color :: Double -> Double -> Double -> Double -> Tile Color
+empty :: Tile Color
+behind :: Tile Color -> Tile Color -> Tile Color
+#+END_SRC
+
+#+BEGIN_QUOTE
+An interesting perspective to take on observations is that they are
+transformations from an algebra into some other object.
+#+END_QUOTE
+
+We can view ~rasterize~ as ~rasterize :: Tile a -> (Int -> Int -> [[a]])~
+
+Can we also make ~Tile a~ an /Applicative Functor/? What kind of semantic can we
+give to ~Applicative~ instance? NOTE: we should preserve the ~Tile~ dimension,
+so the applicative should pair two tiles on a per-pixel basis.
+
+In Haskell to have this behavior of ~Applicative~ on ~List~ you need to use the
+~ZipList~ "type wrapper"
+
+#+BEGIN_SRC haskell
+import Control.Applicative
+
+-- the Applicative defined on List will peform the cartesian product
+-- [(+1) 3, (+1) 4, (+2) 3, (+2) 4]
+[(+1), (+2)] <*> [3, 4]
+
+-- the Applicative defined on ZipList will apply a function to the respective value
+-- [(+1) 3, (+2) 4]
+getZipList $ ZipList [(+1), (+2)] <*> ZipList [3, 4]
+#+END_SRC
+
+#+RESULTS:
+#+begin_EXAMPLE
+[4,5,5,6]
+[4,6]
+#+end_EXAMPLE
+
+By defining ~rasterize' :: Int -> Int -> Tile a -> Compose ZipList ZipList a~ we
+can define the semantics of our applicative
+
+#+BEGIN_EXAMPLE
+-- Law: rasterize/ap
+∀ (w :: Int) (h :: Int) (t1 :: Tile (a -> b)) (t2 :: Tile a).
+  rasterize' w h (t1 <*> t2) = rasterize' w h t1 <*> rasterize' w h t2
+#+END_EXAMPLE
+
+What we are saying here is that the semantic of the ~Applicative~ instance of
+~Tile a~ should have the "same observable effect" of the ~Applicative~ instance
+of ~ZipList~ applied on the rasterized output.
+
+Equation of this general form are known as /homomorphisms/, and when specialized
+over applicatives are called /applicative morphisms/. Our applicative morphism
+shows that it preserves applicative structure (applicative over tiles <=>
+applicative over pixels)
+
+- Homomorphism :: is a structure-preserving map two algebraic structure of the
+  same type.
+
+#+BEGIN_QUOTE
+The technique of "reasoning through the observations" is one of the most potent
+ideas in this book, "The instance's observation follows the observation's
+instance"
+#+END_QUOTE
+
+We can define ~invert :: Color -> Color~ to invert the individual color's
+channels.
+
+#+BEGIN_SRC haskell :eval never
+-- Invert every pixel using the Functor instance of ~Tile a~
+fmap invert $ color 1 0 1 1
+fmap invert sandy
+
+-- ~pure id~ will create a ~Tile id~
+-- ~pure invert~ will create a ~Tile invert~
+-- ~beside x y~ will create a tile where the half left has the ~id~ function, the half right the ~invert~ function
+-- At the end the half left of sandy will remain the same, the half left will invert its pixels color
+beside (pure id) (pure invert) <*> sandy
+#+END_SRC
+
+As a final touch we can generalize over color blending and rather than
+hard-coding operations over ~Color~ we can implement the instance of ~Monoid~
+for ~Color~ and constain the operation over something that implements ~Monoid~
+
+#+BEGIN_SRC haskell :eval never
+emtpy :: Monoid a => Tile a
+behind :: Monoid a => Tile a -> Tile a
+#+END_SRC
+
+Where
+
+#+BEGIN_EXAMPLE
+-- Law: empty
+empty = pure mempty
+
+-- Law: behind
+∀ (t1 :: Tile a) (t2 :: Tile a).
+  behind t1 t2 = liftA2 (<>) t2 t1
+#+END_EXAMPLE
