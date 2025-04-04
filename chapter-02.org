@@ -552,7 +552,7 @@ for ~Color~ and constain the operation over something that implements ~Monoid~
 
 #+BEGIN_SRC haskell :eval never
 emtpy :: Monoid a => Tile a
-behind :: Monoid a => Tile a -> Tile a
+behind :: Monoid a => Tile a -> Tile a -> Tile a
 #+END_SRC
 
 Where
