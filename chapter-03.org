@@ -1,0 +1,40 @@
+#+TITLE: What Makes a Good Algebra?
+
+#+STARTUP: inlineimages
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap EXAMPLE
+
+In the last chapter we came up with an algebra to create images, the following
+the highlights of what we did.
+
+- We had a /scope/, we know what we wanted.
+- Our focus was usability (design?) not implementation.
+- We didn't have an implementation in mind to conform our design to.
+  #+BEGIN_QUOTE
+  Implementations comes with baggage: unnecessary constraints, ones which
+  usually don't compose very well.
+  #+END_QUOTE
+- We had a diverse set of examples which helped us to find out what's possible
+  and what's not with the current building blocks.
+- We began by listing the "obvious" ways of building an image out of another.
+- Every time we added a new "constructor" we gave it /laws/ relating it to the
+  constructors previously defined.
+- The /laws/ tried to "encode" what we "meant" by introducing each new
+  constructor.
+- One of the main focus of our algebra was to e /compositional/. Our
+  understanding of the smaller pieces can be used to understand larger pieces.
+  There is /no implicit state/.
+- All constructors provided high-level functionalities, easy to understand in
+  the context of what we wanted to build (close to the /domain/, using the
+  /domain language/).
+- All constructors where not overly specific, we picked the smallest set of
+  constructors to give us the most expressive power.
+- The algebra we came up with is /closed/ meaning that every syntactically
+  valid way of producing an image is semantically valid.
+- The algebra we came up with is /complete/ meaning that we added as much
+  structure as possible for every reusable concept.
+- The algebra we came up with is /generalized/ meaning that there's no
+  unnecessary constraints, most of the combinators (constructors) are
+  entirelly agnostic of what type was operated over, this lead us to discover
+  that ~Tile a~ was an applicative functor.
