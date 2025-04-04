@@ -1,0 +1,477 @@
+#+TITLE: Scavenger Hunt
+
+#+STARTUP: inlineimages
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap EXAMPLE
+
+* A new algebra
+
+We are going to design another algebra, a more "real-world" case study: a
+backend service for a "scavenger hunt" platform.
+
+Our service will let players to:
+
+- Run around the city
+- Following clues
+- Solving puzzles
+- Exploring new places
+- Doing challenges
+
+Mechanics of the MVP:
+
+- Collect periodic location data of the players
+- Players can send geotagged photos
+- Locations and geotagged photos will be used to "prove" the progression of the
+  player
+- For every challege the player completes a "reward" will be given: can be a
+  point on the leaderboard or something else
+- After a challege is completed, the player is free to tackle another challenge
+- Challeges must be defined in a way so that everyone in the company can
+  contribute to create them
+
+*Exercise*: Attempt a quick design of this system before continuing. Sketch the
+core data types and functions necessary for a scavenger hunt system like
+described above. How would you encode a challenge like “take a selfie at the
+library, and receive one point afterward.”
+
+#+BEGIN_SRC haskell :eval never
+data Player
+
+data Challege = Challenge(Action, Rewad)
+
+data Action = SelfieAt(Place) -- | ... other actions
+
+data Place = Place(Coordinates)
+
+data Position = Position(Player, Place)
+
+data Reward = Earn(Points) -- | ... other rewards
+
+data Points = Point(Int)
+
+placeKnownAs :: String -> Place
+placeKnownAs = undefined
+
+reportPosition :: Player -> Coordinates -> Position
+reportPosition = undefined
+
+reportAction :: Challenge -> Player -> Action -> Maybe Reward
+reportAction = undefined
+
+challenge = Challenge(SelfieAt(placeKnownAs("library")), Earn(Point(1)))
+#+END_SRC
+
+*Exercise*: Try to represent a challenge that requires players to go to the
+beach and to the library — but in either order — and then receive a reward. Can
+your initial design represent this problem? If not, modify the core data types
+to support this functionality.
+
+#+BEGIN_SRC haskell
+data Anction = SelfieAt(Place) | Both(Action, Action)
+
+challenge = Challenge(
+  Both(
+      SelfieAt(placeKnownAs("library")),
+      SelfieAt(placeKnownAs("beach"))),
+  Earn(Point(1))
+)
+#+END_SRC
+
+#+BEGIN_QUOTE
+A great place to begin any algebra is by determining some of its observations,
+that is, the answer to“what is the purpose of this thing we’re building?”
+#+END_QUOTE
+
+#+BEGIN_SRC haskell :eval never
+data Challenge
+data Input
+data Reward
+
+getRewards :: Challenge -> [Input] -> [Reward]
+#+END_SRC
+
+Algebra-Driven Design forces us to be /denotational/ therefore we cannot use
+mutation of variables therefore we must receive the whole player history to
+determine the rewards.
+
+#+BEGIN_SRC haskell :eval never
+data Clue
+data Point
+data Distance
+
+pointOfInterest :: Clue
+                -> Point
+                -> Distance
+                -> Reward
+                -> Challege
+
+photo :: Point -> Photo -> Input
+within :: Point -> Point -> Distance -> Bool
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: point of interest
+-- if the challenge is a pointOfInterest, and the user sends us a photo
+-- taken in the proximity circle, then they should receive the associated reward.
+
+∀ (c :: Clue) (poi :: Point) (d :: Distance) (r :: Reward) (p :: Point) (pic :: Photo) (is: [Input]).
+  within poi p d =>
+    getRewards (pointOfInterest c poi d r)
+               (photo p pic : is)
+               = [r]
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+-- Law: outside point of interest
+-- states that the getRewards of a pointOfInterest ignores any photo inputs that
+-- are not within the location tolerance.
+
+∀ (c :: Clue) (poi :: Point) (d :: Distance) (r :: Reward) (p :: Point) (pic :: Photo) (is: [Input]).
+  not (within poi p d) =>
+    getRewards (pointOfInterest c poi d r)
+               (photo p pic : is)
+               =
+    getRewards (pointOfInterest c poi d r)
+               is
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+-- Law: unmatching point of interest
+-- ignore any input which is not a photo
+
+-- given the trivial observation `isPhoto :: Input -> Bool`
+
+∀ (c :: Clue) (poi :: Point) (d :: Distance) (r :: Reward) (i :: Input) (is: [Input]).
+  not (isPhoto i) =>
+    getRewards (pointOfInterest c poi d r)
+               (i : is)
+               =
+    getRewards (pointOfInterest c poi d r)
+               is
+#+END_EXAMPLE
+
+This time the laws seems more convoluted, is it because the domain is more
+complex or because we got the wrong algebra?
+
+#+BEGIN_QUOTE
+Involved equations are a classic symptom of designing the wrong algebra.
+#+END_QUOTE
+
+Note that the ~pointOfInterest~ constructor takes 4 parameters and does 3
+orthogonal things:
+- Informing the user (the ~Clue~)
+- Describing an area (the ~Point~ and ~Distance~)
+- Giving a ~Reward~
+
+Looking at the laws:
+- All three laws don't care about the ~Clue~
+- Two of them don't care about the ~Reward~ (NDG: mmm, but the always compare
+  the result of ~getRewards~ which is a list of ~Reward~ 🤔)
+
+Conclusion: ~pointOfInterest~ is not about ~Clue~ and ~Reward~
+
+#+BEGIN_SRC haskell :eval never
+clue :: Clue -> Challenge -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: getRewards/clue
+-- clues do not affect rewards
+
+∀ (cl :: Clue) (ch :: Challenge).
+  getRewards (clue cl ch) = getRewards ch
+
+-- NDG: we are missing the inputs? Should have been
+∀ (cl :: Clue) (ch :: Challenge) (is :: [Input]).
+  getRewards (clue cl ch) is = getRewards ch is
+#+END_EXAMPLE
+
+By intuition we make a ~reward~ constructor a terminal able to create a
+~Challenge~ from nothing.
+
+#+BEGIN_SRC haskell :eval never
+reward :: Reward -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law :: getRewards/reward
+-- a `reward` challenge doesn't have any requirements, for every input we give the reward
+
+∀ (r :: Reward) (is :: [Input]).
+  getReward (reward r) is = [r]
+#+END_EXAMPLE
+
+*Exercise*: Reduce ~getRewards (clue c (reward r)) i~ to its simplest form via
+algebraic manipulation.
+
+#+BEGIN_EXAMPLE
+getRewards (clue c (reward r)) i    -- using: getRewards (clue cl ch) = getRewards ch
+getRewards (reward r) i             -- using: getReward (reward r) i = [r]
+[r]
+#+END_EXAMPLE
+
+We can pull the remaining two parameters (~Point~ and ~Distance~) in their own constructor
+
+#+BEGIN_SRC haskell :eval never
+photoWithin :: Point
+            -> Distance
+            -> Challenge
+            -> Challenge
+#+END_SRC
+
+The idea is that ~photoWithin~ will wait until a photo has been taken within the
+tollerance and before switching to its ~reward~ challege (which will give
+immediately back the reward)
+
+#+BEGIN_EXAMPLE
+-- Law: getReward/photoWithin
+
+∀ (poi :: Point) (p :: Point) (pic :: Photo) (d :: Distance) (c :: Challege) (is :: [Input]).
+  within poi p d =>
+    getRewards (photoWithin poi d c) (photo p pic : is) = getRewards c is
+
+-- NDC: I'm not convinced, this means that you need to build build "carefully" the challenge, you can miss the reward
+
+-- We still need to express the laws describing the behaviour of not getting a reward if
+-- the selfie is not in range and if the input is not a selfie
+
+-- Law: getReward/photoWithin outside range
+∀ (poi :: Point) (p :: Point) (pic :: Photo) (d :: Distance) (c :: Challege) (is :: [Input]).
+  not (within poi p d) =>
+    getRewards (photoWithin poi d c) (photo p pic : is) = getRewards (photoWithin poi d c) is
+
+-- Law: getReward/photoWithin unmatching photoWithin
+∀ (poi :: Point) (d :: Distance) (c :: Challege) (i :: Input) (is :: [Input]).
+  not (isPhoto) =>
+    getRewards (photoWithin poi d c) (i : is) = getRewards (photoWithin poi d c) is
+
+-- Law: pointOfInterest
+-- pointOfInterest now can be espressed by composition of simpler constructors
+∀ (c :: Clue) (p :: Point) (d :: Distance) (r :: Reward).
+  pointOfInterest c p d r = clue c (photoWithin p d (reward r))
+#+END_EXAMPLE
+
+We need to be able to track if the photo was taken at a certain altitude (ex.
+for a building rooftop)
+
+#+BEGIN_SRC haskell :eval never
+data Altitude
+
+photoAbove :: Altitude
+           -> Challenge
+           -> Challenge
+
+-- to replace `within` predicate
+aboveAltitude :: Point -> Altitude -> Bool
+#+END_SRC
+
+NOTE: in our laws we used directly ~within~ so the laws are not generic on the
+predicate or on the kind of challenge
+
+* Input Filters
+
+There are similarities between ~photoWithin~ and ~photoAbove~, they both scan
+through an ~Input~ list until they are satisfied. Can we parametrize this
+behaviour?
+
+#+BEGIN_SRC haskell :eval never
+data InputFilter
+
+matches :: InputFilter -> Input -> Bool
+
+photoWithin :: Point -> Distance -> InputFilter
+photoAbove :: Altitude -> InputFilter
+#+END_SRC
+
+*Exercise:* Give semantics in terms of matches for both ~photoWithin~ and
+~photoAbove~.
+
+#+BEGIN_EXAMPLE
+-- Law: matches/photoWithin
+∀ (p1 :: Point) (p2 :: Point) (d :: Distance) (pic :: Photo).
+  matches (photoWithin p1 d) (photo p2 pic) = within p1 p2 d
+
+-- Law: matches/photoAbove
+∀ (p :: Point) (h :: Altitude) (pic :: Photo).
+  matches (photoAbove h) (photo p pic) = aboveAltitude p h
+#+END_EXAMPLE
+
+We can then create a constructor for ~Challege~ which will apply the filter.
+
+#+BEGIN_SRC haskell :eval never
+gate :: InputFilter -> Challenge -> Challenge
+#+END_SRC
+
+With the following semantics
+
+#+BEGIN_EXAMPLE
+-- Law: getRewards/gate
+∀ (c :: Challenge) (f :: InputFilter) (i :: Input) (is :: [Input]).
+  matches f i =>
+    getRewards (gate f c) (i : is) = getRewards c is
+
+-- Law: getRewards/gate unmatched
+∀ (c :: Challenge) (f :: InputFilter) (i :: Input) (is :: [Input]).
+  not (matches f i) =>
+    getRewards (gate f c) (i : is) = getRewards (gate f c) is
+
+-- Law: getRewards/gate empty
+∀ (c :: Challenge) (f :: InputFilter).
+  getRewards (gate f c) [] = []
+#+END_EXAMPLE
+
+Finally we can now express ~pointOfInterest~ in terms of gate
+
+#+BEGIN_EXAMPLE
+-- Law: pointOfInterest
+∀ (c :: Clue) (p :: Point) (d :: Distance) (r :: Reward).
+  pointOfInterest c p d r = clue c (gate (photoWithin p d) (reward r))
+#+END_EXAMPLE
+
+Can we combine more ~InputFilter~?
+
+#+BEGIN_SRC haskell
+always :: InputFilter
+never :: InputFilter
+
+andF :: InputFilter -> InputFilter -> InputFilter
+orF :: InputFilter -> InputFilter -> InputFilter
+notF :: InputFilter -> InputFilter
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: matches/always
+∀ (i :: Input).
+  matches always i = True
+
+-- Law: matches/never
+∀ (i :: Input).
+  matches never i = False
+
+-- Law: matches/andF
+∀ (i :: Input) (f1 :: InputFilter) (f2 :: InputFilter).
+  matches (andF f1 ff2) i = matches f1 i && matches f2 i
+
+-- Law: matches/orF
+∀ (i :: Input) (f1 :: InputFilter) (f2 :: InputFilter).
+  matches (andF f1 ff2) i = matches f1 i || matches f2 i
+
+-- Law: matches/notF
+∀ (i :: Input) (f :: InputFilter).
+  matches (notF f) i = not (matches f i)
+#+END_EXAMPLE
+
+* Simultaneous Challenges
+
+*Exercise:* Consider the term ~gate (photoWithin p1 d1) (gate (photoWithin p2
+d2) (reward r))~. What is your intuitive understanding of this expression? Do
+our stated semantics agree with you? Hint: try evaluating ~getRewards~ of the
+above, using two different photo inputs.
+
+#+BEGIN_EXAMPLE
+-- The player will get a reward if the input sequence contains first a photo matching the
+-- filter `(photoWithin p1 d1)` and the a photo matchin the filter `(photoWithin p2 d2)`
+
+getRewards (gate (photoWithin p1 d1) (gate (photoWithin p2 d2) (reward r))) ((photo p3 pic1) : (photo p4 pic2) : [])
+-- if (matches (photoWithin p1 d1) (photo p3 pic1))
+getRewards (gate (photoWithin p2 d2) (reward r)) ((photo p4 pic2) : [])
+-- if (matches (photoWithin p2 d2) (photo p4 pic2))
+getRewards (reward r) []
+-- using `getReward (reward r) is = [r]`
+[r]
+#+END_EXAMPLE
+
+We can create a new ~InputFilter~ to check the passive location data of the player
+
+#+BEGIN_SRC haskell :eval never
+logWithin :: Point -> Distance -> InputFilter
+#+END_SRC
+
+*Exercise:* Use ~locWithin~ to encode a challenge that requires our player to
+walk around the block twice, clockwise, as in figure 4.9. Assume you have p1,
+p2, p3 :: Point and d1, d2, d3 :: Distance corresponding to each corner’s
+locations and tolerances.
+
+#+BEGIN_SRC haskell :eval never
+aroundTheBlock :: [(Point, Distance)] -> Challenge -> Challenge
+aroundTheBlock [] c = c
+aroundTheBlock ((p, d):t) c = gate (logWith p d) (aroundTheBlock t c)
+
+aroundTheBlockTwice :: [(Point, Distance)] -> Challenge -> Challenge
+aroundTheBlockTwice ps c = aroundTheBlock ps (aroundTheBlock ps c)
+
+twice :: (Challenge -> Challenge) -> Challenge -> Challenge
+twice build c = build (build c)
+
+aroundTheBlockTwice' :: [(Point, Distance)] -> Challenge -> Challenge
+aroundTheBlockTwice' ps c = twice (aroundTheBlock ps) c
+
+repeatN :: Int -> (Challenge -> Challenge) -> Challenge -> Challenge
+repeatN 0 _ c = c
+repeatN n build c = build $ repeatN (n - 1) build c
+
+aroundTheBlockTwice'' :: [(Point, Distance)] -> Challenge -> Challenge
+aroundTheBlockTwice'' ps c = repeatN 2 (aroundTheBlock ps) c
+#+END_SRC
+
+Can we encode a challenge in which players can visit several points of interest
+in ~any~ order?
+
+We need a new constructor
+
+#+BEGIN_SRC haskell :eval never
+both :: Challenge -> Challenge -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: both/commutative
+∀ (c1 :: Challenge) (c2 :: Challenge).
+  both c1 c2 = both c2 c1
+
+-- Law: both/associative
+∀ (c1 :: Challenge) (c2 :: Challenge) (c3 :: Challenge).
+  both (both c1 c2) c3 = both c1 (both c2 c3)
+
+-- Law: both/idempotent
+∀ (c :: Challenge).
+  both c c = c
+
+-- Law
+∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]).
+  getRewards (both c1 c2) is = (getRewards c1 is) ++ (getRewards c2 is)
+#+END_EXAMPLE
+
+*Exercise:* Prove that ~both (both c1 c2) (both c3 c4) = both c1 (both c2 (both
+c3 c4))~. How might an implementation use this fact?
+
+#+BEGIN_EXAMPLE
+both (both c1 c2) (both c3 c4) = both c1 (both c2 (both c3 c4))
+
+both (both c1 c2) (both c3 c4) -- from associativity
+both c1 (both c2 (both c3 c4))
+
+-- Can be used to balance the tree, to reduce the depth of the tree, to improve performance
+#+END_EXAMPLE
+
+With ~both~ the player gets both the rewards of the composing challenges, but
+what about we want to give the reward only when all the challenges are complete?
+
+We miss the capability to create a ~Challenge~ that has no reward at the end
+
+#+BEGIN_SRC haskell :eval never
+empty :: Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: getRewards/empty
+∀ (is :: [Input]).
+  getRewards empty is = []
+
+∀ (c :: Challenge).
+  both empty c = c = both c empty
+#+END_EXAMPLE
+
+* Challenge Completing
+
+TODO
