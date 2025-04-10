@@ -68,7 +68,7 @@ your initial design represent this problem? If not, modify the core data types
 to support this functionality.
 
 #+BEGIN_SRC haskell
-data Anction = SelfieAt(Place) | Both(Action, Action)
+data Action = SelfieAt(Place) | Both(Action, Action)
 
 challenge = Challenge(
   Both(
@@ -80,7 +80,7 @@ challenge = Challenge(
 
 #+BEGIN_QUOTE
 A great place to begin any algebra is by determining some of its observations,
-that is, the answer to“what is the purpose of this thing we’re building?”
+that is, the answer to “what is the purpose of this thing we’re building?”
 #+END_QUOTE
 
 #+BEGIN_SRC haskell :eval never
@@ -166,7 +166,7 @@ orthogonal things:
 
 Looking at the laws:
 - All three laws don't care about the ~Clue~
-- Two of them don't care about the ~Reward~ (NDG: mmm, but the always compare
+- Two of them don't care about the ~Reward~ (NDG: mmm, but they always compare
   the result of ~getRewards~ which is a list of ~Reward~ 🤔)
 
 Conclusion: ~pointOfInterest~ is not about ~Clue~ and ~Reward~
@@ -182,9 +182,13 @@ clue :: Clue -> Challenge -> Challenge
 ∀ (cl :: Clue) (ch :: Challenge).
   getRewards (clue cl ch) = getRewards ch
 
--- NDG: we are missing the inputs? Should have been
+-- NDG: are we missing the inputs? Should have been
 ∀ (cl :: Clue) (ch :: Challenge) (is :: [Input]).
   getRewards (clue cl ch) is = getRewards ch is
+
+-- NDG: it's basically the same thing considering an eta reduction on `is`,
+-- aka: the first law is comparing two functions both awaiting `is`, they
+-- will be equal `f1 = f2 iff ∀ (is : [Input]). f1 is = f2 is`
 #+END_EXAMPLE
 
 By intuition we make a ~reward~ constructor a terminal able to create a

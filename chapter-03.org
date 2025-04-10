@@ -22,7 +22,7 @@ the highlights of what we did.
   constructors previously defined.
 - The /laws/ tried to "encode" what we "meant" by introducing each new
   constructor.
-- One of the main focus of our algebra was to e /compositional/. Our
+- One of the main focus of our algebra was to be /compositional/. Our
   understanding of the smaller pieces can be used to understand larger pieces.
   There is /no implicit state/.
 - All constructors provided high-level functionalities, easy to understand in
@@ -33,8 +33,8 @@ the highlights of what we did.
 - The algebra we came up with is /closed/ meaning that every syntactically
   valid way of producing an image is semantically valid.
 - The algebra we came up with is /complete/ meaning that we added as much
-  structure as possible for every reusable concept.
+  structure (laws?) as possible for every reusable concept.
 - The algebra we came up with is /generalized/ meaning that there's no
-  unnecessary constraints, most of the combinators (constructors) are
-  entirelly agnostic of what type was operated over, this lead us to discover
-  that ~Tile a~ was an applicative functor.
+  unnecessary constraints, most of the combinators (constructors) are entirelly
+  agnostic of what type was operated over, this lead us to discover that ~Tile
+  a~ was an applicative functor.
