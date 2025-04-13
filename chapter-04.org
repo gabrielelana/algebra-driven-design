@@ -478,4 +478,529 @@ empty :: Challenge
 
 * Challenge Completing
 
+Right now we don't have a way to wait for a challenge completion to go to the
+next challenge, for example in case of ~both c1 c2~ the player will get both the
+rewards for ~c1~ and ~c2~, we cannot say "if the player completes both
+challenges then this is the reward"
+
+We need a new combinator for that, a combinator capable of /sequencing/
+challenges
+
+#+BEGIN_SRC haskell :eval never
+andThen :: Challenge -> Challenge -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: andThen/gate
+∀ (f :: InputFilter) (c1 :: Challenge) (c2 :: Challenge).
+  andThen (gate f c1) c2 = gate f (andThen c1 c2)
+
+-- Law: andThen:associative
+∀ (c1 :: Challenge) (c2 :: Challenge) (c3 :: Challenge).
+  andThen (andThen c1 c2) c3 = andThen c1 (andThen c2 c3)
+
+-- Law: andThen:identity
+∀ (c :: Challenge).
+  andThen c empty = andThen empty c = c
+#+END_EXAMPLE
+
+We lack a strong definition of challenge /completion/
+
+#+BEGIN_QUOTE
+Semantics must always be relative to an observation
+#+END_QUOTE
+
+Our only observation for challenges so far is ~getRewards~ which is not suited
+to define challenges completion, we need another observation.
+
+Let's try using the following (spoiler: it's not compositional enough because it
+doesn't tell us how much input is needed for a challenge to complete)
+
+#+BEGIN_SRC haskell :eval never
+completes :: Challenge -> [Input] -> Bool
+#+END_SRC
+
+*Exercise:* Give semantics for ~andThen~ in terms of ~completes~ as defined
+ above. Show that this semantic necessarily contradict "andThen/gate"
+
+#+BEGIN_EXAMPLE
+-- Law: completes/andThen
+∀ (c1 :: Challenge) (c2 :: Challege) (is1 :: [Input]) (is2 :: [Input]).
+  completes c1 is1 && completes c2 is2 =>
+    completes (andThen c1 c2) (is1 ++ is2)
+
+-- Law: completes/gate
+∀ (f :: InputFilter) (c :: Challenge) (i: Input) (is: [Input]).
+  matches f i =>
+    completes (gate f c) (i :: is) = completes c is
+
+∀ (f :: InputFilter) (c :: Challenge) (i: Input) (is: [Input]).
+  not (matches f i) =>
+    completes (gate f c) (i :: is) = false
+
+-- Law: completes/end
+∀ (c :: Challenge).
+  completes c [] = false
+
+-- Law: completes/reward
+∀ (is :: [Input]) (reward R).
+  completes (reward R) is = true
+
+-- Law: completes/empty
+∀ (is :: [Input]).
+  completes empty is = true
+
+--
+--
+-- Given the following law
+∀ (f :: InputFilter) (c1 :: Challenge) (c2 :: Challenge).
+  andThen (gate f c1) c2 = gate f (andThen c1 c2)
+
+∀ (c1 :: Challenge) (c2 :: Challege) (i :: Input) (is1 :: [Input]) (is2 :: [Input]).
+  completes (gate f c1) (i : is1) && completes c2 is2 =>
+    completes (andThen (gate f c1) c2) ((i : is1) ++ is2)
+
+-- the following expression
+completes (andThen (gate f c1) c2) ((i : is1) ++ is2)
+-- should be equal to
+completes (gate f (andThen c1 c2)) ((i : is1) ++ is2)
+
+-- but the second form will consume all the input to check if `gate` is satisfied
+#+END_EXAMPLE
+
+More composable version of ~completes~ will preserve the information on the
+amount of input necessary to complete a challege and leave the rest
+
+#+BEGIN_SRC haskell
+completes :: Challenge -> [Input] -> Maybe [Input]
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: completes/empty
+-- An empty challenge is always completed
+∀ (is :: [Input]).
+  completes empty is = Just is
+
+-- Law: completes/reward
+-- A reward challenge is always completed
+∀ (r :: Reward) (is :: [Input]).
+  completes (reward r) is = Just is
+
+-- Law: completes/both
+-- where `shorterOf :: [a] -> [a] -> [a]` will return the shorter not consumed input
+∀ (c1 :: Challege) (c2 :: Challenge) (is :: [Input]).
+  completes (both c1 c2) is = shorterOf <$> completes c1 is <*> completes c2 is
+#+END_EXAMPLE
+
+*Exercise:* Give a law for the behaviour of ~shorterOf~
+
+#+BEGIN_EXAMPLE
+-- Law: shorter:behaviour
+∀ (as :: [a]) (a :: a).
+  shorterOf (a : as) as = as
+
+-- Law: shorter:base
+∀ (as :: [a]).
+  shorterOf as [] = []
+
+-- Law: shorter:commutative
+∀ (as1 :: [a]) (as2 :: [a]).
+  shorterOf as1 as2 = shorterOf as2 as1
+
+-- Law: shorter:associative
+∀ (as1 :: [a]) (as2 :: [a]) (as3 :: [a]).
+  shorterOf as1 (shorterOf as2 as3) = shorterOf (shorterOf as1 as2) as3
+
+-- Law: shorter:identity
+∀ (as :: [a]).
+  shorterOf as as = as
+#+END_EXAMPLE
+
+*Exercise:* Does shorterOf form a monoid? If so, give it. If not, show which
+laws it doesn’t satisfy.
+
+No, the /identity element/ doesn't exists (should have been the infinitely long
+list), but it's associative, therefore it's a semigroup
+
+Going further with the laws regarding the ~completes~ observation
+
+#+BEGIN_EXAMPLE
+-- Law: completes/clue
+∀ (k :: Clue) (c :: Challege) (is :: [Input]).
+  completes (clue k c) is = completes c is
+
+-- Law: completes/gate
+∀ (f :: InputFilter) (c :: Challege) (i :: Input) (is :: [Input]).
+  matches f i =>
+    completes (gate f c) (i : is) = completes c is
+
+-- Law: completes/gate unmatched
+∀ (f :: InputFilter) (c :: Challege) (i :: Input) (is :: [Input]).
+  not (matches f i) =>
+    completes (gate f c) (i : is) = completes (gate f c) is
+
+-- Law: completes/gate empty
+∀ (f :: InputFilter) (c :: Challege).
+  completes (gate f c) [] = Nothing
+#+END_EXAMPLE
+
+Now we can properly specify the semantics of ~andThen~ under ~completes~ because
+we can use the rest of the input of the first challenge to run the second
+challenge
+
+#+BEGIN_EXAMPLE
+-- Law: completes/andThen
+∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]).
+  completes c1 is >>= completes c2
+
+-- (>>=) :: Monad m => m a -> (a -> m b) -> m b
+-- Maybe [Input] >>= ([Input] -> Maybe [Input])
+
+-- flatMap[M[_], A, B](ma : M[A])(f: A => M[B]): M[B]
+-- flatMap(ma : Option[Input[]])(f: Input[] => Option[Input[]]): Option[Input[]]
+#+END_EXAMPLE
+
+#+BEGIN_QUOTE
+Using ~>>=~ is highly appropriate, monadic binds are used to encode strict
+sequencing of evaluation in lazy languages. Transforming from constructors to a
+well-understood operation is a recurring theme in Algebra-Driven Design, and
+this is the proof that our algebra behaves liek we say it should.
+#+END_QUOTE
+
+Last thing is to give semantics of ~andThen~ under ~getRewards~
+
+#+BEGIN_EXAMPLE
+-- Law: getRewards/andThen
+-- This should be good for both cases
+∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]).
+  getRewards (andThen c1 c2) is =
+    (getRewards c1 is) <> (getRewards c2 <$> completes c1 is)
+
+-- More explicit
+-- Law: getRewards/andThen
+∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]) (is' :: [Input]).
+  completes c1 is == Just is' =>
+    getRewards (andThen c1 c2) is =
+      getRewards c1 is <> getRewards c2 is'
+
+-- Law: getRewards/andThen incomplete
+∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]).
+  completes c1 is == Nothing =>
+    getRewards (andThen c1 c2) is =
+      getRewards c1 is
+      -- That is because c1 never completes, therefore the
+      -- remaining input will be empty, therefore the c2
+      -- challenge will result in empy rewards, therefore
+      -- can be elimnated
+#+END_EXAMPLE
+
+* Simplification
+
+Give distributive laws when possible
+
+#+BEGIN_EXAMPLE
+-- Law: both/andThen/reward
+∀ (r :: Reward) (c1 :: Challenge) (c2 :: Challenge).
+  both (andThen (reward r) c1) c2 =
+    andThen (reward r) (both c1 c2)
+#+END_EXAMPLE
+
+Our algebra is *inconsistent!!!*, it shows a non-confluence, aka a term can be
+reduced in two different lawful ways to two diffent terms.
+
+#+BEGIN_QUOTE
+In computer science and mathematics, /confluence/ is a property of rewriting
+systems, describing which terms in such a system can be rewritten in more than
+one way, to yield the /same result/.
+#+END_QUOTE
+
+#+BEGIN_EXAMPLE
+both (reward r1) (reward r2)                   -- using: andThen c empty = andThen empty c = c
+both (andThen (reward r1) empty) (reward r2)   -- using: both (andThen (reward r) c1) c2 = andThen (reward r) (both c1 c2)
+andThen (reward r1) (both empty (reward r2))   -- using: both (empty c) = c
+andThen (reward r1) (reward r2)
+
+both (reward r1) (reward r2)                   -- using: both c1 c2 = both c2 c1
+both (reward r2) (reward r1)                   -- using: andThen c empty = andThen empty c = c
+both (andThen (reward r2) empty) (reward r1)   -- using: both (andThen (reward r) c1) c2 = andThen (reward r) (both c1 c2)
+andThen (reward r2) (both empty (reward r1))   -- using: both (empty c) = c
+andThen (reward r2) (reward r1)
+
+-- Therefore
+andThen (reward r2) (reward r1) == andThen (reward r1) (reward r2)
+
+-- Is this true? For a human yes 😃 for a formal system no!
+-- That is because when observed through `gerRewards` we get that
+
+getRewards (andThen (reward r2) (reward r1)) = [r1, r2]
+getRewards (andThen (reward r1) (reward r2)) = [r2, r1]
+
+-- But
+
+[r1, r2] !== [r2, r1]
+#+END_EXAMPLE
+
+The problem lies in the relationship between ~both:commutative~ and
+~both:idempotent~ and the rewarding system represented as a list of rewards, and
+a list is neither commutaive nor idempotent
+
+How to fix it?
+- Abandon the ~both:commutative~ and ~both:idempotent~ laws
+- Change the result type of ~getRewards~
+- Try to force commutativity and idempotence in lists with ad-hoc laws
+
+NDG: I don't understand the following quote
+
+#+BEGIN_QUOTE
+Invariants are a feature of the implementation, not of the design.
+#+END_QUOTE
+
+Changing the result type of ~getRewards~ to be both commutative and idempotent
+seems to be the way, we can use a [[https://en.wikipedia.org/wiki/Multiset][Multiset]]
+
+NDG: So the algebra was inconsistent, but we fixed it by changing an observation
+🤔
+
+#+BEGIN_SRC haskell
+getRewards :: Challenge -> [Input] -> Multiset Reward
+#+END_SRC
+
+* A Unified Observation
+Looking at what we have right now:
+- Feels like it's still complicated to evaluate challenges
+- We can operate algebraic reductions without the need of inputs
+- Looking at our current observations (~getRewards~ and ~completes~) all of them
+  only requires the first input in the sequence of inputs, every time we need to
+  duplicate the "traversal" of the inputs, aka is not required for inputs to be
+  a list
+
+We can propose another observation meant to replace both the previous
+observations. NOTE: it works only considering ~empty~ as the only "complete"
+challenge (aka when to stop the "steps")
+
+#+BEGIN_SRC haskell :eval never
+step :: Maybe Input -> Challenge -> (Maybe Reward, Challenge)
+#+END_SRC
+
+NDG: probably we can use ~(Maybe Reward, Maybe Challenge)~ instead of having an
+~empty~ challenge, but I know why he did that, because otherwise the laws below
+would be more convoluted (~(a, Maybe)~ is an ~Applicative Applicate~)
+
+#+BEGIN_EXAMPLE
+-- Law: step/both
+∀ (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge).
+  step i (both c1 c2) = both <$> (step i c1) <*> (step i c2)
+
+-- How it works?
+-- (step i c1) :: (Maybe Reward, Challenge)
+-- (a,) has an instance of `Applicative` only if `Monoid a`
+-- both :: Challenge -> Challenge -> Challenge
+-- both <$> (a, Challenge) :: (a, Challenge -> Challenge)
+-- both <$> (a, Challenge) <*> (a, Challenge) :: (a, Challenge)
+-- where the `a` in the first element of the tuple gets "merged" using its monoid instance
+
+-- in the end the result will be `(rc1 <> rc2, both cc1 cc2)`
+-- where `rcN` are the rewards for `(step i cN)`
+-- and `ccN` are the challenges for `(step i cN)`
+
+-- Law: step/empty
+∀ (i :: Maybe Input).
+  step i empty = pure empty -- meaning `(mempty, empty)` where `mempty :: Monoid a => a`
+
+-- Law: step/reward
+∀ (i :: Maybe Input) (r :: Reward).
+  step i (reward r) = (singleton r, empty) -- where `singleton :: a -> Multiset a`
+
+-- Law: step/gate
+∀ (i :: Input) (f :: InputFilter) (c :: Challenge).
+  matches f i =>
+    step (Just i) (gate f c) = step Nothing c
+
+-- NDG: I would have said `= pure c` which is the equivalent given the law below "step/gate nothing"
+
+-- Law: step/gate unmatched
+∀ (i :: Input) (f :: InputFilter) (c :: Challenge).
+  not (matches f i) =>
+    step (Just i) (gate f c) = pure (gate f c)
+
+-- Law: step/gate nothing
+∀ (f :: InputFilter) (c :: Challenge).
+  step Nothing (gate f c) = pure (gate f c)
+
+-- Law: step/andThen complete
+∀ (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge) (r :: Reward).
+  step i c1 == (r, empty) =>
+    step i (andThen c1 c2) = join (r, step Nothing c2)
+
+-- join :: Monad a => Monad (Monad a) = Monad a
+-- here join :: (,) (,) a -> (,) a
+-- here (r, step Nothing c2) -> (r, (r1, c3)) -> (r <> r1, c3)
+
+-- Why `step Nothing c2` ???
+-- first we should note that: `step Nothing c2 = pure c2`
+-- then, with this we are not saying that we are running the second
+-- challenge without input, but that we are returning the second
+-- challenge to whoever is consuming the inputs using `step`
+
+-- The following is the general version
+
+-- Law: step/andThen incomplete
+∀ (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge).
+  step i c1 == (_, c1') && not (isEmpty c1') =>
+    step i (andThen c1 c2) = andThen <$> step i c1 <*> pure c2
+#+END_EXAMPLE
+
+This is how we will "consume" the inputs
+
+#+BEGIN_EXAMPLE
+∀ (c :: Challenge).
+  runChallenge c = foldM step c . (Nothing :) . fmap Just
+
+-- `fmap Just` turns `[Input]` in `[Maybe Input]`
+-- `(Nothing : )` prepends a Nothing to the list of input `Nothing : [Maybe Input]` to be able
+-- to run the challenge at least once even when there's no input available
+-- At the end we fold the `[Maybe Input]` starting with `c` using `step`
+
+-- foldM :: (Foldable t, Monad m) => (b -> a -> m b) -> b -> t a -> m b
+
+-- We can do that because `Monoid a => Monad ((,) a)` aka there's an instance of `Monad`
+-- for two elements tuples where the first element has an instance of `Monoid`, and
+-- `Reward` has an instance of `Monoid`
+#+END_EXAMPLE
+
+If we worry that we lost something with the unified observation, we can try to
+implement the original observations using the unified one.
+
+#+BEGIN_EXAMPLE
+-- step :: Maybe Input -> Challenge -> (Maybe Reward, Challenge)
+-- getRewards :: Challenge -> [Input] -> Multiset Reward
+-- runChallenge :: Challenge -> [Input] -> (Maybe Reward, Challenge)
+-- completes :: Challenge -> [Input] -> Maybe [Input]
+
+-- Law: getRewards
+∀ (c :: Challenge).
+  getRewards c = fst . runChallenge c
+
+-- Law: completes
+∀ (c :: Challenge).
+  completes c = (== empty) . snd . runChallenge c
+
+-- NDG: I think this is wrong, on the right there's a `[Input] -> Bool`, on the left a `[Input] -> Maybe [Input]`
+#+END_EXAMPLE
+
+* Simmetry
+We have a ~both~ constructor, so why not having an ~either~ constructor?
+
+#+BEGIN_SRC haskell :eval never
+either :: Challenge -> Challenge -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: "either:associativity"
+∀ (c1 :: Challenge) (c2 :: Challenge) (c3 :: Challenge).
+  either (either c1 c2) c3 = either c1 (either c2 c3)
+
+-- Law: "either:commutativity"
+∀ (c1 :: Challenge) (c2 :: Challenge).
+  either c1 c2 = either c2 c1
+
+-- Law: "either/andThen/reward"
+∀ (r :: Reward) (c1 :: Challenge) (c2 :: Challenge).
+  either (andThen (reward r) c1) c2 =
+    andThen (reward r) (either c1 c2)
+
+-- Law: either/empty
+-- ...🤮 why? It would have been better to have `empty` as the identity element?
+∀ (c :: Challenge).
+  not (isReward c) =>
+    either empty c = empty
+
+-- Law: step/either
+∀ (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge).
+  step i (either c1 c2) =
+    either <$> step i c1 <*> step i c2
+
+-- What we are saing here is that the only terminal challenge is `empty`,
+-- and `either` will keep "running" until one of the challenges is `empty`.
+
+-- `either <$> step i c1 <*> step i c2` means that `either` will run the `step`
+-- function on input `i` on `c1` and `c2` both, both branch will result in a
+-- challenge respectively `c1'` and `c2'`, at the end we will create another
+-- `either` challenge with `c1'` and `c2'`, that is until one of the resulting
+-- challenge will be `empty`
+#+END_EXAMPLE
+
+*Exercise:* Does ~either~ form a monoid? If so, what is its identity element?
+
+Yes by having a challenge that will never complete (ie reduce to ~empty~) such
+as ~gate never empty~
+
+*Exercise:* Reduce ~either (reward r1) empty~ to its simmplest form
+
+#+BEGIN_EXAMPLE
+either (reward r1) empty   -- return first not empty
+reward r1
+
+either (reward r1) empty   -- commutativity
+either empty (reward r1)   -- either/empty
+reward r1
+#+END_EXAMPLE
+
+With short circuit we can create challenges with a time limit
+
+#+BEGIN_SRC haskell :eval never
+data Time
+
+time :: Time -> Input
+afterTime :: Time -> InputFilter
+#+END_SRC
+
+As an example the following is a challenge that can be completed only in the
+first hour
+
+#+BEGIN_EXAMPLE
+either (gate (afterTime oneHour) empty)
+       (pointOfInterest ...)
+
+-- That is because you can "escape" from the `either` only when one of the
+-- challenges will be reduced to `empty`, so "either"
+
+-- One of the input will pass the gate -> `empty` without reward -> timeout go home with nothing
+
+-- One of the input will complete (ie terminate with `empty`) the second challenge
+-- which presumably has an associated reward
+#+END_EXAMPLE
+
+*Exercise:* Encapsulate this timeout behavior in a new timeout constructor. Be
+sure to give it a type and suﬀicient laws to entirely specify its behavior.
+
+#+BEGIN_SRC haskell
+timeout :: Time -> Challenge -> Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: timeout
+∀ (t :: Time) (c :: Challenge).
+  timeout t c = either (gate (afterTime t) empty) c
+
+-- I think there's nothing else to say because what's right of the equation
+-- is well specified
+#+END_EXAMPLE
+
+Identity element for ~either~
+
+#+BEGIN_SRC haskell
+bottom :: Challenge
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: bottom
+∀ (c :: Challenge).
+  bottom = gate never c
+#+END_EXAMPLE
+
+* Clues
+TODO
+
+* Generalization
 TODO
