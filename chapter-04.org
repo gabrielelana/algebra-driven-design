@@ -1000,7 +1000,291 @@ bottom :: Challenge
 #+END_EXAMPLE
 
 * Clues
-TODO
+
+#+BEGIN_SRC haskell :eval never
+-- Until now we have a constructor of a Challenge given a Clue and another Challenge
+-- aka a way to attach a Clue to a Challenge
+clue :: Clue -> Challenge -> Challenge
+
+-- Constructor of a clue
+hint :: String -> Clue
+
+-- Clue can be nested? Why not
+-- With this we have a semigroup given the associative law below, and a monoid with the identity element below
+sub :: Clue -> Clue -> Clue
+
+-- An observation to "unroll" a clue
+toList :: Clue -> [String]
+
+-- The identity element
+noClue :: Clue
+#+END_SRC
+
+NDG: is it right to say that an "observation" is a function from our algebra to
+some common data structure?
+
+#+BEGIN_EXAMPLE
+-- Law: sub:associative
+∀ (k1 :: Clue) (k2 :: Clue) (k3 :: Clue).
+  sub k1 (sub k2 k3) = sub (sub k1 k2) k3
+
+-- Law: toList/hint
+∀ (s :: String).
+  toList (hit s) = [s]
+
+-- Law: toList/sub
+∀ (k1 :: Clue) (k2 :: Clue).
+  toList (sub k1 k2) = toList k1 <> toList k2
+
+-- Law: sub/mempty
+∀ (k :: Clue).
+  sub k noClue = k = sub noClue k
+
+-- Law: clue/noClue
+∀ (c :: Challenge)
+  clue noClue c = c
+#+END_EXAMPLE
+
+#+BEGIN_QUOTE
+Laws are most elegant when they preserve meaningful structure
+#+END_QUOTE
+
+#+BEGIN_EXAMPLE
+-- Law: clue/sub
+∀ (k1 :: Clue) (k2 :: Clue) (c :: Challenge).
+  clue (sub k1 k2) c = clue k1 (clue k2 c)
+#+END_EXAMPLE
+
+SKIPPED: clue/noClue and clue/sub form a monoid homomorphism over endomorphism,
+may come back later, maybe not 🤷
+
+Once a player has seen a Clue, then it should last over the challenge (inform
+when the challenge behind the clue is completed or no longer available)
+
+#+BEGIN_SRC haskell
+-- Clue can be in four states, with the "undiscovered" as an implici state for obvious reasons
+data ClueState
+
+seen :: ClueState
+completed :: ClueState
+failed :: ClueState
+
+-- An observation to collect clues and their states
+-- MonoidalMap a Map which uses the instance of Semigroup for the values of conflicting keys
+getClues :: Challenge
+         -> [Input]
+         -> MonoidalMap Clue ClueState
+
+-- The monoid operation for ClueState will keep the makimum of the two ClueState under
+-- the following ordering
+
+-- seen < failed < completed
+
+-- The ordering will give us a monoid but also a semilattice (a partially
+-- ordered set with an upper and lower bound)
+#+END_SRC
+
+To give ~getClues~ semantics using our unified observation ~step~ we need to
+change the ~step~ observation because right now it says nothing about clues
+
+#+BEGIN_SRC haskell
+-- Before
+step :: Maybe Input -> Challenge -> (Multiset Reward, Challenge)
+
+-- After
+step :: Clue -- Need to take a clue as the current "clue context" of "where we are"
+     -> Maybe Input
+     -> Challenge
+     -> ( ( Multiset Reward
+          , MonoidalMap Clue ClueState
+          )
+        , Challenge
+        )
+#+END_SRC
+
+We need to update the laws to pass the clue context, the following is an example
+
+#+BEGIN_EXAMPLE
+-- Law: step/both
+-- Same context gets propagated to both challenges
+∀ (k :: Clue) (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge).
+  step k i (both c1 c2) = both <$> step k i c1 <*> step k i c2
+#+END_EXAMPLE
+
+Now the semantic
+
+#+BEGIN_EXAMPLE
+-- Law: step/clue/empty
+-- Easy case where the challenge is completed
+∀ (kx :: Clue) (i :: Maybe Input) (k :: Clue).
+  step kx i (clue k empty) =
+    tellClue (singleton (sub kx k) completed) *> empty
+
+-- `tellClue` I think is for communicating with the user
+-- `singleton` ??? takes a Clue and a ClueState
+-- `completed` is the constructor for the `ClueState`
+-- `empty` I think is to create an empty result for `step`
+
+-- Law: step/clue/non-empty
+∀ (kx :: Clue) (i :: Maybe Input) (k :: Clue) (c :: Challenge).
+  not (isEmpty c) =>
+    step kx i (clue k c) =
+      tellClue (singleton (sub kx k) seen) *>
+        clue <$> pure k <*> step (sub kx k) i c
+
+-- We add the clue `k` to the context
+-- We "consume" the input `i` over the Challenge `c`
+-- The resulting challenge still has the clue `k`
+#+END_EXAMPLE
+
+We still need to report the failed clues in the pruned branches
+
+#+BEGIN_SRC haskell
+findClues :: Clue
+          -> Challenge
+          -> MonoidalMap Clue ClueState
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+-- Law: step/either
+∀ (kx :: Clue) (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge) (c2' :: Challenge) (z1 :: _) (z2 :: _).
+  step kx i c1 == (z1, empty) &&
+  step kx i c2 == (z2, c2') =>
+    step kx i (either c1 c2) =
+      seenToFailed (findClues kx c2') *> step kx i c2 *> step kx i c1
+
+-- Law: step/either non-empty
+∀ (kx :: Clue) (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge) (c1' :: Challenge) (c2' :: Challenge) (z1 :: _) (z2 :: _).
+  step kx i c1 == (z1, c1') &&
+  step kx i c2 == (z2, c2') &&
+  not (isEmpty c1') && not (isEmpty c2') =>
+    step kx i (either c1 c2) =
+      either <$> step kx i c1 <*> step kx i c2
+#+END_EXAMPLE
 
 * Generalization
-TODO
+
+The algebra is complete, time to review the unnecessary constraint, start with
+the types that we have but we don't use in any law: ~Photo~, ~Point~,
+~Distance~, ~Altitude~, ~Time~. The only place they appear is in ~Input~ and
+~InputFilter~, but the ~Challenge~ machinery only cares about the ~matches~
+observation on ~Input~.
+
+This makes our ~Input~ an excellent candidate to be replaced with a type
+variable.
+
+We need to parametrize ~Challenge~ and ~InputFilter~
+
+#+BEGIN_SRC haskell
+data Challenge i
+data InputFilter i
+
+matches :: InputFilter i -> i -> Bool
+gate :: InputFilter i -> Challenge i -> Challenge i
+#+END_SRC
+
+Separate the reusable "boolean-like" aspects of the input filter machinery (like
+~andF :: InputFilter -> InputFilter -> InputFilter~) and the input specific
+aspect (like ~photoWithin :: Point -> Distance -> InputFilter~)
+
+#+BEGIN_SRC haskell
+-- `f` is the new type parameter corresponding to the input-specifi piece
+class FilterFor f i | f -> i where
+  filterMatches :: f -> i -> Bool
+
+-- NOTE: the `| f -> i` part of the type class is known as "Functional
+-- Dependency", it means that `i` can be determined from `f`, in other words `i`
+-- depends on `f`, as a result `i` can appear only as a result type where `f` is
+-- the input type. See https://wiki.haskell.org/index.php?title=Functional_dependencies
+
+-- Since `f` and `i` are tightly coupled, to improve usability we can relate `i`
+-- to `f` more directly
+
+class HasFilter i where
+  -- NOTE: this feature is called "Associated Types" and it's an application
+  -- (syntactic sugar) of a more general feature ie "Open Data Families"
+  --
+  -- Meaning: for every type `i` there is a corresponding type called
+  -- `CustomFilter i` which models the custom filter on `i`
+  data CustomFilter i
+  filterMatches :: CustomFilter i -> i -> Bool
+
+-- To complete the process we need to lift a `CustomFilter i` to `InputFilter i`
+-- so that all the machinery on `InputFilter i` will work on `CustomFilter i`
+
+custom :: HasFilter i => CustomFilter i -> InputFilter i
+#+END_SRC
+
+Can we generalize further? What about ~Reward~? It's heavily involved in the
+algebra and in the observations, but its content is never inspected. We can
+replace the type ~Reward~ in ~reward :: Reward~ with any type ~r~
+
+#+BEGIN_SRC haskell
+data Challenge i r
+
+reward :: r -> Challenge i r
+
+step :: (HasFilter i, Monoid r, Commutative r)
+     => Clue
+     -> Maybe (Input i)
+     -> Challenge i r
+     -> ( ( r
+          , MonoidalMap Clue ClueState
+          )
+        , Challenge i r
+        )
+#+END_SRC
+
+Since ~r~ must have an instance of ~Monoid~ it make sense to add some monoid
+homomorphism
+
+#+BEGIN_EXAMPLE
+-- Law: reward/mempty
+reward mempty = empty
+
+-- Law: reward/mappend
+reward (r1 <> r2) = andThen (reward r1) (reward r2)
+
+-- Given the definition of "Monoid Homomorphism" from https://proofwiki.org/wiki/Definition:Monoid_Homomorphism
+-- Let (S,∘) and (T,∗) be monoids.
+-- Let ϕ:S→T be a mapping such that
+--   ∀a,b∈S: ϕ(a∘b)=ϕ(a)∗ϕ(b)
+--   ϕ(eS)=eT
+
+-- reward (r1 <> r2) -- ϕ(a∘b)
+-- andThen (reward r1) (reward r2) -- ϕ(a)∗ϕ(b)
+-- They must be equal, we can use the `getRewards` observation
+-- ∀ (i :: Input).
+--   getRewards i (reward (r1 <> r2)) = [r1, r2]
+--   getRewards i (andThen (reward r1) (reward r2)) = getRewards i (reward r1) <> getRewards i (reward r2)
+--                                                  = [r1] <> [r2]
+--                                                  = [r1, r2]
+--
+--   getRewards i (reward mempty) = []
+--   getRewards i empty = []
+#+END_EXAMPLE
+
+Now ~Clue~ is the only concrete things around, but it isomorphic to a list, therefore
+
+#+BEGIN_SRC haskell
+data Challenge i k r
+
+clue :: [k] -> Challenge i k r -> Challenge i k r
+
+step :: (HasFilter f, Monoid r, Commutative r, Ord k)
+     => [k]
+     -> Maybe i
+     -> Challenge i k r
+     -> ( ( r
+          , MonoidalMap [k] ClueState
+          )
+        , Challenge i k r
+        )
+#+END_SRC
+
+Nothing remain that is concrete, the ~Challenge~ abstraction is entirely reusable.
+
+#+BEGIN_QUOTE
+Firm contracts are our only defense against entropy, and the abstraction
+boundaries enforced by parametricity is as strong as they come.
+#+END_QUOTE
