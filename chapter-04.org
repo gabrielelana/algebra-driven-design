@@ -476,7 +476,7 @@ empty :: Challenge
   both empty c = c = both c empty
 #+END_EXAMPLE
 
-* Challenge Completing
+* Challenge Completion
 
 Right now we don't have a way to wait for a challenge completion to go to the
 next challenge, for example in case of ~both c1 c2~ the player will get both the
@@ -536,7 +536,7 @@ completes :: Challenge -> [Input] -> Bool
 
 ∀ (f :: InputFilter) (c :: Challenge) (i: Input) (is: [Input]).
   not (matches f i) =>
-    completes (gate f c) (i :: is) = false
+    completes (gate f c) (i :: is) = completes (gate f c) is
 
 -- Law: completes/end
 ∀ (c :: Challenge).
@@ -550,6 +550,8 @@ completes :: Challenge -> [Input] -> Bool
 ∀ (is :: [Input]).
   completes empty is = true
 
+
+-- REDO, wrong interpretation of complete
 --
 --
 -- Given the following law
@@ -587,7 +589,7 @@ completes :: Challenge -> [Input] -> Maybe [Input]
   completes (reward r) is = Just is
 
 -- Law: completes/both
--- where `shorterOf :: [a] -> [a] -> [a]` will return the shorter not consumed input
+-- where `shorterOf :: [a] -> [a] -> [a]` will return the shorter not remaining input
 ∀ (c1 :: Challege) (c2 :: Challenge) (is :: [Input]).
   completes (both c1 c2) is = shorterOf <$> completes c1 is <*> completes c2 is
 #+END_EXAMPLE
@@ -599,13 +601,13 @@ completes :: Challenge -> [Input] -> Maybe [Input]
 ∀ (as :: [a]) (a :: a).
   shorterOf (a : as) as = as
 
--- Law: shorter:base
-∀ (as :: [a]).
-  shorterOf as [] = []
-
 -- Law: shorter:commutative
 ∀ (as1 :: [a]) (as2 :: [a]).
   shorterOf as1 as2 = shorterOf as2 as1
+
+-- Law: shorter:base
+∀ (as :: [a]).
+  shorterOf as [] = []
 
 -- Law: shorter:associative
 ∀ (as1 :: [a]) (as2 :: [a]) (as3 :: [a]).
@@ -651,7 +653,8 @@ challenge
 #+BEGIN_EXAMPLE
 -- Law: completes/andThen
 ∀ (c1 :: Challenge) (c2 :: Challenge) (is :: [Input]).
-  completes c1 is >>= completes c2
+  completes (andThen c1 c2) is =
+    completes c1 is >>= completes c2
 
 -- (>>=) :: Monad m => m a -> (a -> m b) -> m b
 -- Maybe [Input] >>= ([Input] -> Maybe [Input])
@@ -703,6 +706,12 @@ Give distributive laws when possible
 ∀ (r :: Reward) (c1 :: Challenge) (c2 :: Challenge).
   both (andThen (reward r) c1) c2 =
     andThen (reward r) (both c1 c2)
+
+-- Law: both/andThen/reward
+∀ (r :: Reward) (c1 :: Challenge) (c2 :: Challenge) (c3 :: Challenge).
+  completes c1 is == Just is' =>
+    both (andThen c1 c2) c3 is =
+      andThen c1 (both c2 c3) is
 #+END_EXAMPLE
 
 Our algebra is *inconsistent!!!*, it shows a non-confluence, aka a term can be
@@ -779,12 +788,12 @@ observations. NOTE: it works only considering ~empty~ as the only "complete"
 challenge (aka when to stop the "steps")
 
 #+BEGIN_SRC haskell :eval never
-step :: Maybe Input -> Challenge -> (Maybe Reward, Challenge)
+step :: Maybe Input -> Challenge -> (Multiset Reward, Challenge)
 #+END_SRC
 
 NDG: probably we can use ~(Maybe Reward, Maybe Challenge)~ instead of having an
 ~empty~ challenge, but I know why he did that, because otherwise the laws below
-would be more convoluted (~(a, Maybe)~ is an ~Applicative Applicate~)
+would be more convoluted (~(a, Maybe)~ is an ~Applicative Applicative~)
 
 #+BEGIN_EXAMPLE
 -- Law: step/both
@@ -792,7 +801,7 @@ would be more convoluted (~(a, Maybe)~ is an ~Applicative Applicate~)
   step i (both c1 c2) = both <$> (step i c1) <*> (step i c2)
 
 -- How it works?
--- (step i c1) :: (Maybe Reward, Challenge)
+-- (step i c1) :: (Multiset Reward, Challenge)
 -- (a,) has an instance of `Applicative` only if `Monoid a`
 -- both :: Challenge -> Challenge -> Challenge
 -- both <$> (a, Challenge) :: (a, Challenge -> Challenge)
