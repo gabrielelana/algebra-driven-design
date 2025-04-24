@@ -919,15 +919,33 @@ either :: Challenge -> Challenge -> Challenge
     andThen (reward r) (either c1 c2)
 
 -- Law: either/empty
--- ...🤮 why? It would have been better to have `empty` as the identity element?
+-- To be able to keep the short circuit of the operator, `either` should stop
+-- at the first `empty` challenge
+-- ...🤮
 ∀ (c :: Challenge).
   not (isReward c) =>
     either empty c = empty
+
+-- `both` will "complete" only when both challenges are completed
+-- (ie. they will reduce to an `empty` challenge)
+
+-- `either` will "complete" when at least one of the challeges are
+-- completed (ie. they will reduce to an `empty` challenge)
 
 -- Law: step/either
 ∀ (i :: Maybe Input) (c1 :: Challenge) (c2 :: Challenge).
   step i (either c1 c2) =
     either <$> step i c1 <*> step i c2
+
+    # step i c1 = (r1, c1')
+    # step i c2 = (r2, c2')
+
+    # either <$> (r1, c1') <*> (r2, c2')
+
+    # either <$> (r1, c1') = (r1, either c1' :: Challenge -> Challenge)
+    # (r1, either c1' :: Challenge -> Challenge) <*> (r2, c2')
+
+    # (r1 <> r2, either c1' c2')
 
 -- What we are saing here is that the only terminal challenge is `empty`,
 -- and `either` will keep "running" until one of the challenges is `empty`.
@@ -935,8 +953,8 @@ either :: Challenge -> Challenge -> Challenge
 -- `either <$> step i c1 <*> step i c2` means that `either` will run the `step`
 -- function on input `i` on `c1` and `c2` both, both branch will result in a
 -- challenge respectively `c1'` and `c2'`, at the end we will create another
--- `either` challenge with `c1'` and `c2'`, that is until one of the resulting
--- challenge will be `empty`
+-- `either` challenge with `c1'` and `c2'`, that is until one of the challenge
+-- will be `empty`
 #+END_EXAMPLE
 
 *Exercise:* Does ~either~ form a monoid? If so, what is its identity element?
@@ -944,15 +962,17 @@ either :: Challenge -> Challenge -> Challenge
 Yes by having a challenge that will never complete (ie reduce to ~empty~) such
 as ~gate never empty~
 
-*Exercise:* Reduce ~either (reward r1) empty~ to its simmplest form
+*Exercise:* Reduce ~either (reward r1) empty~ to its simplest form
 
 #+BEGIN_EXAMPLE
-either (reward r1) empty   -- return first not empty
-reward r1
+either (reward r1) empty
+either empty empty
+empty
 
 either (reward r1) empty   -- commutativity
 either empty (reward r1)   -- either/empty
-reward r1
+either empty empty
+empty
 #+END_EXAMPLE
 
 With short circuit we can create challenges with a time limit
@@ -972,12 +992,12 @@ either (gate (afterTime oneHour) empty)
        (pointOfInterest ...)
 
 -- That is because you can "escape" from the `either` only when one of the
--- challenges will be reduced to `empty`, so "either"
+-- challenges will be reduced to `empty`
 
--- One of the input will pass the gate -> `empty` without reward -> timeout go home with nothing
-
--- One of the input will complete (ie terminate with `empty`) the second challenge
--- which presumably has an associated reward
+-- The first challenge will be completed (ie. reduced to `empty`) after one
+-- hour, assuming the second challenge will not be completed in the meantime,
+-- then the `either` challenge will be completed taking away the possibility
+-- to complete the second challenge
 #+END_EXAMPLE
 
 *Exercise:* Encapsulate this timeout behavior in a new timeout constructor. Be
@@ -1011,15 +1031,15 @@ bottom :: Challenge
 * Clues
 
 #+BEGIN_SRC haskell :eval never
--- Until now we have a constructor of a Challenge given a Clue and another Challenge
--- aka a way to attach a Clue to a Challenge
+-- Until now we have a constructor of a Challenge given a Clue and another
+-- Challenge aka a way to attach a Clue to a Challenge
 clue :: Clue -> Challenge -> Challenge
 
 -- Constructor of a clue
 hint :: String -> Clue
 
--- Clue can be nested? Why not
--- With this we have a semigroup given the associative law below, and a monoid with the identity element below
+-- Clue can be nested? Why not, with this we have a semigroup given the
+-- associative law below, and a monoid with the identity element below
 sub :: Clue -> Clue -> Clue
 
 -- An observation to "unroll" a clue
@@ -1066,6 +1086,24 @@ Laws are most elegant when they preserve meaningful structure
 
 SKIPPED: clue/noClue and clue/sub form a monoid homomorphism over endomorphism,
 may come back later, maybe not 🤷
+
+#+BEGIN_EXAMPLE
+-- Law: clue/noClue
+∀ (c :: Challenge)
+  clue noClue c = c
+
+-- Law: clue/sub
+∀ (k1 :: Clue) (k2 :: Clue) (c :: Challenge).
+  clue (sub k1 k2) c = clue k1 (clue k2 c)
+
+-- Given the definition of "Monoid Homomorphism" from https://proofwiki.org/wiki/Definition:Monoid_Homomorphism
+-- Let (S,∘) and (T,∗) be monoids.
+-- Let ϕ:S→T be a mapping such that
+--   ∀a,b∈S: ϕ(a∘b)=ϕ(a)∗ϕ(b)
+--   ϕ(eS)=eT
+
+-- Monoid endomorphism = when a monoid homomorphism form a monoid
+#+END_EXAMPLE
 
 Once a player has seen a Clue, then it should last over the challenge (inform
 when the challenge behind the clue is completed or no longer available)
