@@ -1,0 +1,349 @@
+#+TITLE: Tile Implementation
+
+#+STARTUP: inlineimages
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap EXAMPLE
+
+* Tile Implementation
+
+We ended the second chapter with a plublic interface that looked like the
+following
+
+#+BEGIN_SRC haskell :eval never
+
+-- Tile abstract representation
+data Tile a
+
+-- Capabilities of a Tile
+instance Functor Tile
+instance Applicative Tile
+
+-- Observation function or the "Interpreter"
+rasterize :: Int -> Int -> Tile a -> [[a]]
+
+-- Combinators
+cw :: Tile a -> Tile a
+ccw :: Tile a -> Tile a
+flipH :: Tile a -> Tile a
+flipV :: Tile a -> Tile a
+quad :: Tile a -> Tile a -> Tile a -> Tile a -> Tile a
+swirl :: Tile a -> Tile a
+beside :: Tile a -> Tile a -> Tile a
+above :: Tile a -> Tile a -> Tile a
+empty :: Monoid a => Tile a
+behind :: Monoid a => Tile a -> Tile a -> Tile a
+#+END_SRC
+
+The plan is:
+
+- Implement it in a naive straightforward way first
+- Generate a comprehensive suite of tests using the first implementation
+- Implement it in a fast and innovative way, using the test suite to check its
+  correctness
+
+#+BEGIN_QUOTE
+Every algebra gives rise to an "obvious" implementation called its /Initial
+Encoding/.
+#+END_QUOTE
+
+NDG: I found this [[https://peddie.github.io/encodings/encodings-text.html][step-by-step article]] which can shed some light on why the
+"Tagless Final" pattern is called that way and what really is about.
+
+In the end /Initial Encoding/ is a fancy name for implementing each of our
+algebra's constructors as a *data constructor* directly in the implementation
+language and then implement the interpreter as the interpreter of the tree like
+data structure we built with the data constructors.
+
+#+BEGIN_SRC haskell :eval never
+data Tile a where
+  Cw :: Tile a -> Tile a
+  Ccw :: Tile a -> Tile a
+  FlipH :: Tile a -> Tile a
+  FlipV :: Tile a -> Tile a
+  Quad :: Tile a -> Tile a -> Tile a -> Tile a -> Tile a
+  Swirl :: Tile a -> Tile a
+  Beside :: Tile a -> Tile a -> Tile a
+  Above :: Tile a -> Tile a -> Tile a
+  Empty :: Monoid a => Tile a
+  Behind :: Monoid a => Tile a -> Tile a -> Tile a
+  -- The following data constructors represent they way of building tiles via
+  -- `fmap`, `pure` and `<*>`
+  Fmap :: (a -> b) -> Tile a -> Tile b
+  Pure :: a -> Tile a
+  Ap :: Tile (a -> b) -> Tile a -> Tile b
+
+-- Now for every data constructor we can create a constructor/combinator to map
+-- one-to-one between terms in our algebra (what can be viewed by developer
+-- using our code as an Internal Domain Specific Language) and the "syntax tree"
+-- of our algebra in Haskell.
+
+cw :: Tile a -> Tile a
+cw = CW
+
+ccw :: Tile a -> Tile a
+ccw = CCW
+
+-- etc...
+#+END_SRC
+
+This is pretty simple and it has an obvious flaw: we are not enforcing our laws
+in any way even when it would be easy to do
+
+#+BEGIN_SRC haskell :eval never
+
+-- 1. we can encode directly encode our laws rewriting equivalent terms using
+-- pattern matching
+
+flipH :: Tile a -> Tile -> a
+flipH (FlipH t) = t
+flipH t = FlipH t
+
+cw :: Tile a -> Tile a
+cw (Cw (Cw (Cw t))) = t
+cw t = Cw t
+
+-- 2. use the laws of our algebra to pick a core set of "primitive" operations
+-- and use them to rewrite all the other combinator
+
+ccw :: Tile a -> Tile a
+ccw (Cw t) = t -- encodes the law `ccw . cw = id`
+ccw t = cw . cw . cw $ t -- encodes the law `ccw = cw . cw . cw`
+
+flipV :: Tile a -> Tile a
+flipV = ccw . flipH . cw
+
+#+END_SRC
+
+Constructors/combinators ~fmap~, ~pure~ and ~<*>~ can be given by implementing
+the knonw type classes below
+
+#+BEGIN_SRC haskell :eval never
+
+instance Applicative Tile where
+  pure :: (Applicative Tile) => a -> Tile a
+  pure = Pure
+
+  (<*>) :: Tile (a -> b) -> Tile a -> Tile b
+  (<*>) = Ap
+
+instance Functor Tile where
+  fmap :: (Functor Tile) => (a -> b) -> Tile a -> Tile b
+  fmap f = (pure f <*>)
+
+#+END_SRC
+
+This are the primitives of our algebra we ended up with
+
+#+BEGIN_SRC haskell :eval never
+data Tile a where
+  Cw :: Tile a -> Tile a
+  FlipH :: Tile a -> Tile a
+  Above :: Tile a -> Tile a -> Tile a
+  Pure :: a -> Tile a
+  Ap :: Tile (a -> b) -> Tile a -> Tile b
+#+END_SRC
+
+Now we have everyting to implement our interpreter
+
+#+BEGIN_SRC haskell :eval never
+rasterize :: Int -> Int -> Tile a -> [[a]]
+rasterize w h (FlipH t) = reverse <$> rasterize w h t
+rasterize w h (Cw t) = rotate2d $ rasterize w h t
+  where
+    rotate2d :: [[a]] -> [[a]]
+    rotate2d = fmap reverse . transpose
+rasterize w h (Above t1 t2) = rasterize w (div h 2) t1 <> rasterize w (h - div h 2) t2
+rasterize w h (Pure a) = replicate h $ replicate w a
+rasterize w h (Ap f t) = coerce $ rasterize' w h f <*> rasterize' w h t
+
+rasterize' :: Int -> Int -> Tile a -> Compose ZipList ZipList a
+rasterize' w h t = coerce $ rasterize w h t
+#+END_SRC
+
+* Generating Tests
+
+Property based testing can be seen as templates to generate unit tests by
+specifying exactly how input and output should be related.
+
+#+BEGIN_QUOTE
+The author (developer) should be able to describe classes of correctness, rather
+than instances of correctness
+#+END_QUOTE
+
+In this case we are going to take a step further by using a "theorem searching
+program" to automatically generate our property tests.
+
+We need the following elements:
+
+1. A generator for the tiles
+2. An implementation of the system
+3. A description of the constructors
+
+#+BEGIN_SRC haskell :eval never
+instance (CoArbitrary a, Arbitrary a) => Arbitrary (Tile a) where
+  arbitrary :: (Arbitrary a) => Gen (Tile a)
+  arbitrary = sized $ \n ->
+    if n <= 1
+      then pure <$> arbitrary
+      else
+        frequency
+          -- NOTE: use the algebra constructors to include whatever logic is
+          -- implemented in the constructors to the test surface.
+          [ (3,) $ pure <$> arbitrary,
+            (9,) $ beside <$> decay 2 <*> decay 2,
+            (9,) $ above <$> decay 2 <*> decay 2,
+            (2,) $ cw <$> arbitrary,
+            (2,) $ ccw <$> arbitrary,
+            (4,) $ flipH <$> arbitrary,
+            (4,) $ flipV <$> arbitrary,
+            (6,) $ swirl <$> decay 4,
+            (3,) $ quad <$> decay 4 <*> decay 4 <*> decay 4 <*> decay 4
+            (2,) $ (<*>) <$> (decay 2) @(Tile (a -> a)) <*> decay 2
+            -- NOTE: `behind` and `empty` will require `a` to be a `Monoid` to
+            -- generate that we will limit the generation of tiles limited to
+            -- `a`s with an instance of `Monoid`
+          ]
+    where
+      decay :: (Arbitrary a) => Int -> Gen a
+      decay n = scale (`div` n) arbitrary
+
+  shrink (Cw t) = t : (cw <$> shrink t)
+  shrink (FlipH t) = t : (flipH <$> shrink t)
+  shrink (Above t1 t2) = t1 : t2 : (above <$> shrink t1 <*> shrink t2)
+  shrink (Pure a) = pure <$> shrink a
+  shrink (Ap _ _) = []
+
+-- Will satisfy `CoArbitrary a` for `Tile PixelRGBA8`
+instance CoArbitrary PixelRGBA8 where
+  coarbitrary (PixelRGBA8 r g b a) = coarbitrary (r, g, b, a)
+
+-- Will satisfy `Arbitrary a` for `Tile PixelRGBA8`
+instance Arbitrary PixelRGBA8 where
+  arbitrary = do
+    a <- choose (0, 255)
+    case a == 0 of
+      True -> pure mempty
+      False -> PixelRGBA8 <$> choose (0, 255) <*> choose (0, 255) <*> choose (0, 255) <*> pure a
+#+END_SRC
+
+We need to tell to the "magic library" the notion of equality or observability
+of terms in our algebra
+
+We have our observation function to give us the equality
+
+#+BEGIN_EXAMPLE
+-- Law: observation equality
+∀ (t1 :: Tile) (t2 :: Tile).
+  ∀ (w :: Int) (h :: Int).
+    rasterize w h t1 == rasterize w h t2 => t1 = t2
+#+END_EXAMPLE
+
+It should be straightforward, but... it doesn't work
+
+#+BEGIN_SRC haskell :eval never
+instance Observe
+  (Small Int, Small Int)
+  [[a]]
+  (Tile a) where
+  observe (Small w, Small h) t
+    = rasterize (max 1 w) (max 1 h) t
+#+END_SRC
+
+Because we need to prove that the universally quantified ~a~ is observable, then
+the following is the solution
+
+#+BEGIN_SRC haskell :eval never
+instance Observe test outcome [[a]] =>
+  Observe (Small Int, Small Int, test)
+          outcome
+          (Tile a) where
+  observe (Small w, Small h, x) t
+    = observe x (rasterize (max 1 w) (max 1 h) t)
+#+END_SRC
+
+The ~Observe~ instance is going to give us the ~=~=~ operator
+
+#+BEGIN_SRC haskell :eval never
+-- NOTE: our `a` is the `Tile a'`
+-- NOTE: our `outcome` is the output of `rasterize` aka `[[a']]`
+
+-- (=~=) :: (Show test, Show outcome, Observe test outcome a) => a -> a -> Property
+
+quickCheck $ cw @Bool . cw . cw . cw =~= id
+
+-- NDG: I think the previous example works by using the following instance of observe
+-- (Arbitrary a, Observe test outcome b) => Observe (a, test) outcome (a -> b)
+
+-- So what we are really comparing is a function `Tile a -> Tile a`, where `a`
+-- in `Tile` is `Bool` (because in this case we really don't care)
+#+END_SRC
+
+This can be also achieved using QuickCheck directly by writing property tests
+for every law using our interpreter/observation function.
+
+What /quickspec/ can do for us is to generate those tests by providing the
+/signature/ of our algebra, describing what constructors are available
+/quickspec/ will generate all sorts of well-typed expressions and by comparing
+them is going find all the laws for us (aka the relationship between
+constructors).
+
+#+BEGIN_SRC haskell :eval never
+sig_cons :: Sig
+sig_cons = signature
+  [ con "cw" $ cw @A
+  , con "ccw" $ ccw @A
+  , con "beside" $ beside @A
+  , con "above" $ above @A
+  , con "flipV" $ flipV @A
+  , con "flipH" $ flipH @A
+  , con "pure" $ pure @Tile @A
+  , con "<*>" $ (<*>) @Tile @A @B
+  , con "quad" $ quad @A
+  , con "swirl" $ swirl @A
+  , con "behind" $ liftC @(Monoid A) $ behind @A
+  , con "empty" $ liftC @(Monoid A) $ empty @A
+  ]
+
+sig_bg :: Sig
+sig_bg = background
+  [ con "<>" $ liftC @(Monoid A) $ (<>) @A
+  , con "mempty" $ liftC @(Monoid A) $ mempty @A
+  ]
+
+sig_types :: forall m. (m ~ [Word8]) => Sig
+sig_types = signature
+  [ mono @m
+  , monoObserve @(Tile m)
+  , monoObserve @(Tile (m -> m))
+  , instanceOf @(Monoid m)
+  , instanceOf @(Monoid (Tile m))
+  , vars ["t"] $ Proxy @(Tile A)
+  , vars ["tf"] $ Proxy @(Tile (A -> B))
+  , defaultTo $ Proxy @m
+  , withMaxTermSize 5
+  ]
+
+sig :: Sig
+sig = sig_bg <> sig_cons <> sig_types
+
+quickSpec sig
+-- 1. empty = mempty
+-- 2. pure mempty = mempty
+-- 3. ccw mempty = mempty
+-- 4. cw mempty = mempty
+-- 5. flipH mempty = mempty
+-- 6. flipV mempty = mempty
+-- 7. swirl mempty = mempty
+-- 8. behind t t2 = t2 <> t
+-- 9. above mempty mempty = mempty
+-- 10. beside mempty mempty = mempty
+-- 11. ccw (pure x) = pure x
+-- 12. ccw (cw t) = t
+-- 13. cw (pure x) = pure x
+-- 14. cw (ccw t) = t
+-- 15. cw (cw t) = ccw (ccw t)
+-- 16. cw (flipH t) = ccw (flipV t)
+#+END_SRC
+
+The only thing left to do is to convert those found laws in property tests
