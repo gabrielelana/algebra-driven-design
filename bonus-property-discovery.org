@@ -1,0 +1,214 @@
+#+TITLE: Property Discovery
+
+#+STARTUP: inlineimages
+#+PROPERTY: header-args:haskell :results replace output
+#+PROPERTY: header-args:haskell+ :noweb yes
+#+PROPERTY: header-args:haskell+ :wrap result
+
+Related but not taken from the book
+
+Used resources:
+- "ScalaCheck" book, chapter 4
+- "Property-Based Testing with PropEr, Erlang and Elixir" book, chapter 3
+- "Testing Elixir", book, pp208 - pp216
+- [[https://fsharpforfunandprofit.com/posts/property-based-testing-2/][Choosing properties for property-based testing]]
+  - [[https://fsharpforfunandprofit.com/posts/property-based-testing-3][Choosing properties in practices, part 1]]
+  - [[https://fsharpforfunandprofit.com/posts/property-based-testing-4][Choosing properties in practices, part 2]]
+  - [[https://fsharpforfunandprofit.com/posts/property-based-testing-5][Choosing properties in practices, part 3]]
+- [[https://www.youtube.com/watch?v=NcJOiQlzlXQ][John Hughes - Building on developers' intuitions]]
+- [[https://www.youtube.com/watch?v=G0NUOst-53U][John Hughes - Keynote: How to specify it!]]
+- [[https://www.youtube.com/watch?v=shngiiBfD80][Property-Based Testing for Better Code - Jessica Kerr]]
+
+* How to Discover Properties?
+
+The following are a list of strategies and examples
+
+** Different path, same destination
+We need to test the correctness of ~f~, we need to find a ~g~ so that it's
+commutative with ~f~. Therefore we can check if ~f . g~ is equal to ~g . f~
+
+Example: for a list, we want to test ~sort~, we have a function ~negate~ that is
+going to negate all the values in the list, then we can check if ~sort . negate~
+is equal to ~negate . sort~
+
+A better way to think of this is to find a simpler representation of the output,
+where the same operation you want to test can be applied directly to the output.
+
+Example: A map represented as a binary tree, we need to test the insert, for
+every generated tree ~T~ and a pair ~(k, v)~ we can insert the pair in the tree
+obtaining another tree ~T1~ (output), then we can convert the tree into a list
+~L1~ (simpler representation). In the same test we can convert the initial tree
+~T~ into a list ~L~ and then insert the same pair ~(k, v)~ obtaining another
+list ~L2~. The list ~L1~ must be equal to ~L2~.
+
+#+BEGIN_EXAMPLE
+T ---> T1
+|      |
+|      |
+⌄      ⌄
+L ---> L1 == L2
+#+END_EXAMPLE
+
+
+** There and back again (Round-Trip properties)
+Based on combining the an operation with its inverse.
+
+Useful when need to test the correctness of both operations, ex.
+encoder/decoder, encrypt/decrypt, serialize/deserialize, ...
+
+Or better when you already have the correct "inverse" function of the function
+you need to test.
+
+If we call ~f~ the function under test and ~f'~ its inverse, then we can check
+if ∀ x ~(f' . f) x == x~.
+
+Example: for every list xs ~(reverse . reverse) xs == xs~
+
+** Some things never change (Invariants)
+Sometimes the things we need to test carries some guarantees, they promise
+(often not explicitly) you something, we can check that.
+
+Example: the ~sort~ of a list do not change the number of elements in the list.
+
+Example: the ~sort~ of a list do not change the elements in the list.
+
+Example: if we are implementing an arbitrary precision arithmetic library, then
+for every number ~n > 0~ and ~m > 0~ the sum of them ~s = n + m~ must be ~s > n
+&& s > m~
+
+Example: if a binary operation ~*~ should be commutative then for every input
+~x~ and ~y~ : ~x * y == y * x~3
+
+Example: in the [[https://kata-log.rocks/mars-rover-kata][Mars Rover Kata]] the space where the rover moves is wrapped, so,
+no matter the initial position, if you choose a length ~N~, and you choose a turn
+~T~ (right or left), if you move forward for ~N~ and the you turn ~T~ for four
+times (aka you draw a square), you must end up in the initial position.
+
+Example: in the [[https://kata-log.rocks/mars-rover-kata][Mars Rover Kata]] if you never change direction, but you only go
+forward or backwards an arbitrary amount of times, then the initial direction
+must never change.
+
+Example: in the [[https://kata-log.rocks/mars-rover-kata][Mars Rover Kata]] if you never go forward or backwards, but only
+change direction an arbitrary amount of times, then the initial position must
+never change.
+
+Example: in the [[https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life][Game of Life]] there are well known stable patterns (aka
+configurations that never changes when the universe evolves) and periodic
+patterns (aka configurations that repeats after a fixed and known amount of
+evolution steps), those can be used as invariants.
+
+** The more things change, the more they stay the same (Idempotence)
+When doing an operation twice is the same as doing it once.
+
+Example: the sort of a list should be idempotent ~sort . sort == sort~
+
+Example: in the [[https://kata-log.rocks/mars-rover-kata][Mars Rover Kata]] the space where the rover moves is wrapped, so,
+no matter the initial position, no matter the initial direction, if you move
+forward ~N~ times where ~N~ is the dimension of the current space, then you
+should end up in the initial position with the initial direction.
+
+** Solve smaller problem first (Induction)
+If a large "problem" can be broken in smaller problems, and if we can prove some
+properties for the smaller problems then you can often prove that those
+properties hold for the larger problem.
+
+Basically you can search for properties expressed in an inductive way, often
+based on the recursive structure of the "problem".
+
+Example: if we are trying to prove the correctness of ~sort~ applied to a list,
+then we use the recursive definition of sorted:
+- an empty list is a sorted list
+- a list with only one element is a sorted list
+- the head element of a sorted list must be <= the the second
+- the tail of a sorted list must be a sorted list
+
+Example: in a binary search tree:
+- the root element must be greater than or equal of all the elements in the left branch
+- the root element must be less than of all the elements in the right branch
+- the left branch must be a search tree.
+- the right branch must be a search tree.
+
+** Hard to prove, easy to verify
+Sometimes is harder to find properties as relationship between input and output,
+and it's easier to verify if the output is "correct".
+
+The same principle can be applied when it's easier to compute the inverse of the
+function under test, in this case the verification step is to compute the input
+from the output anche check if the original input is the same as the computed
+one.
+
+Example: for the ~sort~ is relatively easy to verify if the output is a sorted
+list.
+
+Example: when you need to factorize something, you can check if putting the
+result of the factorization is the same as the original input.
+
+** Test oracle
+The "oracle" is an alternative, already proven correct, implementation of what
+we are trying implementing.
+
+In some cases there's a known trivial solution for a problem which is unusable
+in your specific case, then you can use the trivial solution to verify the
+correctness or your "clever" solution.
+
+Example: use insertion sort to verify an esoteric sort algorithm
+
+Example: [[https://github.com/trifork/erjang/blob/35c5dd5e869360e183363565ce2a8b4ce00b72e2/src/test/erl/properties/erlang/conversions_and_ops.erl#L315][here]] Kresten Krab Thorup is trying to check if its Erlang machine
+implementation on the JVM is correct by generating Elang programs, executing the
+erlang program on the BEAM (the original Erlang virtual machine: the "oracle"),
+executing the same erlang program on the JVM, and then comparing the results.
+
+** Stateful test oracle (Poor man model checking?)
+Same as the oracle, but in this case the oracle is more of a simplified version
+of the SUT (System Under Test) often called "the model", which often is built
+for this explicit purpose.
+
+Example: the full behaviour of a distributed key value store can be replicated
+with an hashmap stored in memory, it will not scale horizontally, it will not be
+reliable, it will not be resilient to errors, but from the functional point of
+view can replicate its behavior so that we can generate a list of commands, give
+them to both and then compare their internal state. Why? Because while you send
+commands you can also cause failures in the distributed key value store and by
+doing so you are checking its failure tolerance.
+
+Example: the model can be as complex as a single boolean. We want to verify the
+following property of our application: after a login, not matter what I do, if I
+don't logout, the current user is still logged in. To model this wanted behavior
+a single boolean flag is enough, when the model receives the "login" command
+will switch the flag on ~true~, on the "logout" will swith to ~false~, every
+other command will not change the flag.
+
+** Being incomplete is ok
+We don't have to come up with a complete and sound set of specifications in
+terms of properties to get value from them. We can check only specific
+properties, certain conditions, they are still valuable, start small.
+
+A few questions to get started
+- What will be unacceptable behaviour?
+- What sholud be always true?
+
+Example: a function that should never return a negative number.
+
+Example: the output of a ~compress~ function should always be smaller than its
+input.
+
+** Relational properties
+Properties on the outputs that can be deduced by properties on the inputs
+
+Example: if ~input1~ is bigger than ~input2~ then when testing ~compress~ the
+~output1~ must be bigger than ~output2~
+
+** Generate the output, derive the input
+Useful in cases when in testing ~f~ it's easy to compute the inverse function
+~f⁻¹~, then we can generate a valid output (~O~), then compute the input (~I~)
+and finally check if ~f(I) == O~
+
+Example: run length encoding of a string, it's easy to decode the encoded
+representation
+
+Example: in the book "Property-Based Testing in a Screencast Editor" the
+functionality under test was the possibility to categorize video clips as
+"still" or "moving" based on some heuristics. The solution was to generate a
+sequence of tuples ~(Moving | Still, Duration)~, then generate a video clip (the
+input), then categorize it and at the end compare the categorization with the
+initial input.
